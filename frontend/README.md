@@ -1,12 +1,12 @@
-# 🛡️ Niveshak SafeGuard — Frontend
+# 🛡️ BharatFinanceEdu — Frontend
 
-The web app for **Niveshak SafeGuard**, an educational, SEBI-aligned investor-safety
+The web app for **BharatFinanceEdu**, an educational, SEBI-aligned investor-safety
 companion for Indian retail investors. It teaches investing basics, scores
 behavioural impulsivity (the **FIN score**), warns about suspicious tips with a
 screenshot scan, and runs a data-driven "License Before You Buy" safety quiz —
 in **English, हिंदी and मराठी**.
 
-> **Disclaimer:** Niveshak SafeGuard is educational only. It is **not** a
+> **Disclaimer:** BharatFinanceEdu is educational only. It is **not** a
 > SEBI-registered advisor and nothing it shows is investment advice. There is
 > **no trading**: no buy/sell/hold, no price predictions, no tips.
 

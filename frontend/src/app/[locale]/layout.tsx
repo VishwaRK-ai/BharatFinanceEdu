@@ -45,8 +45,8 @@ export async function generateMetadata({
 
   return {
     title: {
-      default: "Niveshak SafeGuard",
-      template: "%s · Niveshak SafeGuard",
+      default: "BharatFinanceEdu",
+      template: "%s · BharatFinanceEdu",
     },
     description: t("meta.description"),
     icons: { icon: "/logo.svg" },

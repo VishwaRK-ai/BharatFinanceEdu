@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Niveshak SafeGuard",
+    "appName": "BharatFinanceEdu",
     "getStarted": "Get started",
     "goToDashboard": "Go to dashboard",
     "howItWorks": "How it works",
@@ -64,12 +64,12 @@
   },
   "landing": {
     "meta": {
-      "title": "Niveshak SafeGuard",
+      "title": "BharatFinanceEdu",
       "description": "Educational investor-safety companion: spot red flags in tips, measure your FIN and learn the basics in your language. No trading, no advice, no predictions."
     },
     "hero": {
       "headline": "Don't let a hot tip burn your savings.",
-      "sub": "Niveshak SafeGuard teaches you to spot red flags, measures how much FIN drives your decisions, and warns you before you act — in your language, with no trading and no advice.",
+      "sub": "BharatFinanceEdu teaches you to spot red flags, measures how much FIN drives your decisions, and warns you before you act — in your language, with no trading and no advice.",
       "fomoLabel": "FIN meter",
       "fomoBand": "High FIN",
       "flagChip": "Red flag detected: promises guaranteed returns",
@@ -159,7 +159,7 @@
     }
   },
   "disclaimer": {
-    "footer": "Educational information only — not investment advice. Niveshak SafeGuard is not a SEBI-registered advisor."
+    "footer": "Educational information only — not investment advice. BharatFinanceEdu is not a SEBI-registered advisor."
   },
   "fomo": {
     "title": "FIN quiz",
@@ -305,7 +305,7 @@
   },
   "stock": {
     "title": "Stock",
-    "metaTitle": "{symbol} • Niveshak SafeGuard",
+    "metaTitle": "{symbol} • BharatFinanceEdu",
     "back": "Back",
     "retry": "Try again",
     "marketOpen": "Market open",
@@ -642,8 +642,8 @@
       },
       "share": "Share summary",
       "shareCopied": "Summary copied to clipboard",
-      "shareTitle": "My Niveshak SafeGuard result",
-      "shareText": "{level} — Niveshak SafeGuard safety result. Educational only, not investment advice.",
+      "shareTitle": "My BharatFinanceEdu result",
+      "shareText": "{level} — BharatFinanceEdu safety result. Educational only, not investment advice.",
       "errorTitle": "Couldn't load this result",
       "errorBody": "Something went wrong loading your result. Please try again.",
       "errorRetry": "Back to safety checks",
@@ -744,7 +744,7 @@
     },
     "steps": {
       "welcome": {
-        "title": "A quick tour of Niveshak SafeGuard",
+        "title": "A quick tour of BharatFinanceEdu",
         "body": "I'll walk you through each part of the app — what it does and when to use it — in about two minutes. Use Next/Back anytime, or Skip to exit."
       },
       "dashboard-search": {
@@ -833,7 +833,7 @@
       },
       "finish": {
         "title": "You're all set",
-        "body": "That's the whole app. Remember: Niveshak SafeGuard educates and warns — it never tells you to buy, sell or hold. Reopen this guide anytime."
+        "body": "That's the whole app. Remember: BharatFinanceEdu educates and warns — it never tells you to buy, sell or hold. Reopen this guide anytime."
       }
     }
   }

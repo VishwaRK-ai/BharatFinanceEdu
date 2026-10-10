@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛡️ Niveshak SafeGuard
+# 🛡️ BharatFinanceEdu
 
 ### Protecting India's First-Time Investor from FOMO, Scams and Impulsive Decisions
 
@@ -15,7 +15,7 @@
 
 ---
 
-> **Disclaimer:** Niveshak SafeGuard is an educational tool only. It is **not** a SEBI-registered investment adviser. Nothing it outputs constitutes investment advice, a buy/sell signal, or a price prediction.
+> **Disclaimer:** BharatFinanceEdu is an educational tool only. It is **not** a SEBI-registered investment adviser. Nothing it outputs constitutes investment advice, a buy/sell signal, or a price prediction.
 
 </div>
 
@@ -53,7 +53,7 @@ India added **~10 crore new retail investors** between 2020 and 2024. The vast m
 | Face language barriers in financial education | Only ~12% of India speaks English confidently |
 | Fall for unregistered advisors making illegal promises | SEBI receives 10,000+ complaints annually about investment fraud |
 
-**Niveshak SafeGuard** is an AI-powered, multilingual investor safety companion that addresses every one of these problems - in **English, Hindi and Marathi**.
+**BharatFinanceEdu** is an AI-powered, multilingual investor safety companion that addresses every one of these problems - in **English, Hindi and Marathi**.
 
 ---
 
@@ -122,7 +122,7 @@ Our project is a full-stack, production-grade system - not a prototype - that to
 
 ## 🔍 RAG Pipeline - How We Ground the AI
 
-One of the most critical components of Niveshak SafeGuard is the **Retrieval-Augmented Generation (RAG)** pipeline. Instead of relying solely on the LLM's training data, every user question is first grounded in actual SEBI and RBI regulatory documents.
+One of the most critical components of BharatFinanceEdu is the **Retrieval-Augmented Generation (RAG)** pipeline. Instead of relying solely on the LLM's training data, every user question is first grounded in actual SEBI and RBI regulatory documents.
 
 ```mermaid
 flowchart LR
@@ -168,7 +168,7 @@ The response field `"rag_sources_used": true` confirms when RAG context influenc
 
 ## 💾 Streaming Database - Neon Postgres
 
-Niveshak SafeGuard uses **Neon Postgres** as its persistent, serverless streaming database for all structured data that must survive across browser sessions.
+BharatFinanceEdu uses **Neon Postgres** as its persistent, serverless streaming database for all structured data that must survive across browser sessions.
 
 ### Why Neon?
 
@@ -297,7 +297,7 @@ User: "Mujhe Reliance mein invest karna chahiye?"
 
 ### 🎯 2. FIN Score - FOMO, Impulsivity, Negligence
 
-The FIN score is Niveshak SafeGuard's flagship behavioural metric - a **0-100 composite score**:
+The FIN score is BharatFinanceEdu's flagship behavioural metric - a **0-100 composite score**:
 
 ```
 FIN Score = 0.45 x base_score
@@ -329,7 +329,7 @@ Score Bands:
 ```mermaid
 sequenceDiagram
     actor U as Investor
-    participant NS as Niveshak SafeGuard
+    participant NS as BharatFinanceEdu
     participant YF as yfinance
     participant LLM as Fine-Tuned LLM (Colab)
     participant DB as Neon
@@ -509,7 +509,7 @@ User sends: "Should I buy Infosys?"
 ## 📂 Project Structure
 
 ```
-Niveshak_SafeGuard/
+BharatFinanceEdu/
 |
 +-- README.md                          <- You are here
 |
@@ -670,7 +670,7 @@ npm run dev
 
 ### Team RELIC
 
-*Builders of Niveshak SafeGuard*
+*Builders of BharatFinanceEdu*
 
 **SANGYAN Hackathon - Open Innovation Track**
 
@@ -680,7 +680,7 @@ npm run dev
 
 ---
 
-**Niveshak SafeGuard** | Team RELIC | SANGYAN Hackathon
+**BharatFinanceEdu** | Team RELIC | SANGYAN Hackathon
 
 Built with love for India's 10 crore new retail investors
 
