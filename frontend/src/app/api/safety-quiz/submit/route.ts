@@ -152,6 +152,7 @@ export async function POST(request: NextRequest) {
       { headers: { "cache-control": "no-store" } }
     );
   } catch (err) {
+    console.error("[/api/safety-quiz/submit] Failed to submit safety quiz:", err);
     return mapBackendError(err);
   }
 }

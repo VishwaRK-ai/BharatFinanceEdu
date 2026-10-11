@@ -214,15 +214,19 @@ async function callBackend(
     }
 
     if (response.status === 401 || response.status === 403) {
+      console.error(`[backend-client] Unauthorized (status ${response.status}) on ${path}`);
       throw new BackendError("unauthorized", undefined, response.status);
     }
     if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      console.error(`[backend-client] Upstream error on ${path} (status ${response.status}):`, errText);
       throw new BackendError("upstream", undefined, response.status);
     }
 
     try {
       return await response.json();
-    } catch {
+    } catch (parseErr) {
+      console.error(`[backend-client] Failed to parse JSON response on ${path}:`, parseErr);
       throw new BackendError("bad_response", undefined, response.status);
     }
   } finally {
