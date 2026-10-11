@@ -1,3 +1,4 @@
+import os
 from gradio_client import Client
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -6,9 +7,12 @@ from asr_and_tts import run_multilingual_tts
 
 TTS_LANGUAGE = "mr"
 
-# --- 1. CONFIGURATION ---
-COLAB_API_URL = "https://6049c98a29d60cb6f2.gradio.live"
-client = Client(COLAB_API_URL)
+api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
+api_user = os.getenv("AZURE_API_USER", "admin")
+api_pass = os.getenv("AZURE_API_PASS", "BharatFinance2026!")
+
+client_auth = (api_user, api_pass) if api_user and api_pass else None
+client = Client(api_url, auth=client_auth)
 
 embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
 vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)

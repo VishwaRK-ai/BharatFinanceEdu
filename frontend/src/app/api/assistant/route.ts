@@ -83,12 +83,46 @@ export async function POST(request: NextRequest) {
   chatHistory.reverse();
 
   try {
-    const result = await assistant({
-      message,
-      sessionId: visitorId,
-      chatHistory,
-      locale,
-    });
+    let replyText = "";
+    try {
+      const authHeader = `Basic ${Buffer.from("admin:BharatFinance2026!").toString("base64")}`;
+      const promptText = chatHistory.length > 0
+        ? `${chatHistory.map((t) => `${t.role}: ${t.content}`).join("\n")}\nuser: ${message}`
+        : message;
+
+      const res = await fetch("http://20.41.114.241:7860/api/predict", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          data: [promptText, 256],
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`LLM endpoint returned status ${res.status}`);
+      }
+
+      const resJson = (await res.json()) as { data?: [string] };
+      replyText = resJson?.data?.[0] ?? "";
+    } catch {
+      // Fall back to backend client assistant if direct call fails
+      const fallback = await assistant({
+        message,
+        sessionId: visitorId,
+        chatHistory,
+        locale,
+      });
+      replyText = fallback.reply;
+    }
+
+    const result = {
+      reply: replyText,
+      rag_sources_used: false,
+      live_data_used: false,
+    };
 
     // Persist both turns only after a successful reply, so a retry never
     // duplicates the user message. The stored user text is the CLEAN original

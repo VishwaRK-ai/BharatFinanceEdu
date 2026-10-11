@@ -21,9 +21,13 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # 1. CONFIGURATION & STATE
 # =====================================================================
 
-# Update this link whenever your Colab instance restarts!
-COLAB_API_URL = "https://53009bcd71fd65cbac.gradio.live"
-client = Client(COLAB_API_URL)
+# Render will inject these securely at runtime
+api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
+api_user = os.getenv("AZURE_API_USER", "admin")
+api_pass = os.getenv("AZURE_API_PASS", "BharatFinance2026!")
+
+client_auth = (api_user, api_pass) if api_user and api_pass else None
+client = Client(api_url, auth=client_auth)
 
 # In-memory storage (Replace with Redis/PostgreSQL in production)
 quiz_sessions: Dict[str, List[Dict[str, Any]]] = {}
@@ -103,13 +107,20 @@ def get_live_stock_data(query: str) -> str:
 def call_colab_llm(user_prompt: str, context: str, system_prompt: str) -> str:
     """Bridges the local FastAPI server to the Colab GPU Inference Server."""
     try:
-        # Calls the 3-argument function defined in your new Colab cell
-        response = client.predict(
-            user_prompt,
-            context,
-            system_prompt,
-            fn_index=0
-        )
+        # Calls the function on remote Azure VM Gradio server
+        try:
+            response = client.predict(
+                prompt=f"{system_prompt}\n\nContext:\n{context}\n\nUser:\n{user_prompt}",
+                max_tokens=256,
+                api_name="/predict"
+            )
+        except Exception:
+            response = client.predict(
+                user_prompt,
+                context,
+                system_prompt,
+                fn_index=0
+            )
         return response
     except Exception as e:
         print(f"LLM Bridge Error: {e}")
