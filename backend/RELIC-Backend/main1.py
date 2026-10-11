@@ -39,7 +39,10 @@ from test_ocr_security import analyze_image
 from volatility_alert import check_volatility
 
 # Render will inject these securely at runtime
-api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
+raw_api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
+# Strip potential markdown link formatting e.g. [url](url) or surrounding brackets/quotes/whitespace
+match = re.search(r'https?://[^\s\)\]]+', raw_api_url)
+api_url = match.group(0) if match else raw_api_url.strip().strip("[]()\"'")
 api_user = os.getenv("AZURE_API_USER")
 api_pass = os.getenv("AZURE_API_PASS")
 

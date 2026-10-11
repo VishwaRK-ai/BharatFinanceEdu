@@ -28,7 +28,9 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # =====================================================================
 
 # Render will inject these securely at runtime
-api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
+raw_api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
+match = re.search(r'https?://[^\s\)\]]+', raw_api_url)
+api_url = match.group(0) if match else raw_api_url.strip().strip("[]()\"'")
 api_user = os.getenv("AZURE_API_USER")
 api_pass = os.getenv("AZURE_API_PASS")
 

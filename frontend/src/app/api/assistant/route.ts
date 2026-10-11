@@ -87,7 +87,9 @@ export async function POST(request: NextRequest) {
     try {
       const apiUser = process.env.AZURE_API_USER || "admin";
       const apiPass = process.env.AZURE_API_PASS || "BharatFinance2026!";
-      const apiUrl = process.env.AZURE_API_URL || "http://20.41.114.241:7860/api/predict";
+      const rawApiUrl = process.env.AZURE_API_URL || "http://20.41.114.241:7860/api/predict";
+      const urlMatch = rawApiUrl.match(/https?:\/\/[^\s)\]]+/);
+      const apiUrl = urlMatch ? urlMatch[0] : rawApiUrl.trim().replace(/^[\[\(]+|[\]\)]+$/g, "");
 
       const authHeader = `Basic ${Buffer.from(`${apiUser}:${apiPass}`).toString("base64")}`;
       const promptText = chatHistory.length > 0

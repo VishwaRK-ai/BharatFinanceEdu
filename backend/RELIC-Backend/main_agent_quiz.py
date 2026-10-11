@@ -7,7 +7,10 @@ from asr_and_tts import run_multilingual_tts
 
 TTS_LANGUAGE = "mr"
 
-api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
+raw_api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
+import re
+match = re.search(r'https?://[^\s\)\]]+', raw_api_url)
+api_url = match.group(0) if match else raw_api_url.strip().strip("[]()\"'")
 api_user = os.getenv("AZURE_API_USER")
 api_pass = os.getenv("AZURE_API_PASS")
 
