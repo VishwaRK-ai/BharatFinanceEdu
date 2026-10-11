@@ -42,7 +42,7 @@ chat_history: Dict[str, List[Dict[str, str]]] = {}
 
 # Initialize Embeddings & Local ChromaDB (SEBI/RBI Data)
 try:
-    embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
     print("✅ Local ChromaDB loaded successfully.")
 except Exception as e:

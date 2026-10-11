@@ -16,7 +16,7 @@ api_pass = os.getenv("AZURE_API_PASS")
 
 client = Client(api_url, auth=(api_user, api_pass))
 
-embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
 
 # --- 2. INVESTOR RISK QUIZ ---
