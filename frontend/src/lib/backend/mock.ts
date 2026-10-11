@@ -1,6 +1,7 @@
 import type { Locale } from "@/i18n/routing";
 import type { AssistantResponse, ChatTurn } from "./schemas";
 import type {
+  BackendQuizQuestion,
   QuizQuestion,
   QuizStartResponse,
   QuizSubmitResult,
@@ -390,7 +391,21 @@ export async function mockQuizStart(input: {
     questions: bank.questions,
   });
 
-  return { questions: bank.questions, stockName: input.targetStock };
+  const explanations = MOCK_EXPLANATIONS[input.locale] ?? MOCK_EXPLANATIONS.en;
+  const topics = MOCK_TOPICS[input.locale] ?? MOCK_TOPICS.en;
+  const fullQuestions: BackendQuizQuestion[] = bank.questions.map((q, idx) => ({
+    category: topics[idx] ?? `Topic ${idx + 1}`,
+    question: q.question,
+    options: q.options,
+    correct_answer: bank.correct[idx] ?? "A",
+    explanation: explanations[idx] ?? "",
+  }));
+
+  return {
+    questions: bank.questions,
+    fullQuestions,
+    stockName: input.targetStock,
+  };
 }
 
 export async function mockQuizSubmit(input: {

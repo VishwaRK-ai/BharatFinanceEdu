@@ -7,7 +7,7 @@ import { scanSummarySchema } from "@/lib/backend/schemas";
 import { db } from "@/db";
 import { fomoProfiles } from "@/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
-import { matchQuizStock } from "@/lib/safety";
+import { matchQuizStock, saveSafetyQuiz } from "@/lib/safety";
 import { apiRequireVisitor } from "@/lib/visitor";
 
 export const dynamic = "force-dynamic";
@@ -97,9 +97,39 @@ export async function POST(request: NextRequest) {
       scanSummary: parsed.data.scanSummary ?? null,
       fomo,
     });
-    return NextResponse.json(quiz, {
-      headers: { "cache-control": "no-store" },
+
+    const quizId = quiz.quizId || crypto.randomUUID();
+    const questionsToSave =
+      quiz.fullQuestions && quiz.fullQuestions.length > 0
+        ? quiz.fullQuestions
+        : quiz.questions.map((q) => ({
+            question: q.question,
+            options: q.options,
+            correct_answer: "A",
+          }));
+
+    // Securely persist complete quiz with correct answers to Neon PostgreSQL
+    await saveSafetyQuiz({
+      sessionId: visitorId,
+      quizId,
+      visitorId,
+      ticker: parsed.data.ticker,
+      stockName: quiz.stockName ?? stockName,
+      questions: questionsToSave,
     });
+
+    // Return sanitized quiz payload to browser (correct answers never reach the client)
+    return NextResponse.json(
+      {
+        quizId,
+        stockName: quiz.stockName ?? stockName,
+        topic: quiz.topic,
+        questions: quiz.questions,
+      },
+      {
+        headers: { "cache-control": "no-store" },
+      }
+    );
   } catch (err) {
     console.error("[/api/safety-quiz] Failed to start safety quiz:", err);
     return mapBackendError(err);

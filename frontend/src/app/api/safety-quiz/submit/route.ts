@@ -1,34 +1,14 @@
-import { desc, eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/db";
-import { fomoProfiles, safetyAttempts } from "@/db/schema";
-import { safetyQuizSubmit } from "@/lib/backend/client";
-import { mapBackendError } from "@/lib/backend/errors";
+import { safetyAttempts } from "@/db/schema";
 import { quizSubmitRequestSchema } from "@/lib/backend/schemas";
 import { recomputeFomo } from "@/lib/fomo-recompute";
 import { rateLimit } from "@/lib/rate-limit";
-import { verdictFor } from "@/lib/safety";
+import { getSavedQuiz, gradeQuiz } from "@/lib/safety";
 import { apiRequireVisitor } from "@/lib/visitor";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
-
-/** Latest FOMO profile for this visitor (best-effort — grading works without it). */
-async function loadFomo(
-  visitorId: string
-): Promise<{ score: number; band: string } | null> {
-  try {
-    const rows = await db
-      .select({ fomoScore: fomoProfiles.fomoScore, band: fomoProfiles.band })
-      .from(fomoProfiles)
-      .where(eq(fomoProfiles.visitorId, visitorId))
-      .orderBy(desc(fomoProfiles.createdAt))
-      .limit(1);
-    return rows[0] ? { score: rows[0].fomoScore, band: rows[0].band } : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Grade the quiz against the backend, compute our verdict (PRD B5 rules —
@@ -75,21 +55,30 @@ export async function POST(request: NextRequest) {
   }
 
   const { answers, ticker, locale, quizId, tipSource, scanSummary } = parsed.data;
-  const fomo = await loadFomo(visitorId);
 
   try {
-    const graded = await safetyQuizSubmit({
-      sessionId: visitorId,
-      answers,
-      locale,
+    // Fetch the stored quiz from Neon PostgreSQL (completely stateless from Python backend)
+    const savedQuiz = await getSavedQuiz({
       quizId: quizId ?? null,
-      tipSource: tipSource ?? null,
-      scanSummary: scanSummary ?? null,
-      fomo,
+      visitorId,
+      ticker,
     });
-    const verdict = verdictFor(
-      graded.score,
-      graded.total,
+
+    if (!savedQuiz) {
+      return NextResponse.json(
+        {
+          error: "quiz_expired",
+          message: "Quiz session not found or expired. Please generate a new quiz.",
+        },
+        { status: 404 }
+      );
+    }
+
+    // Grade submission locally against the database record
+    const graded = gradeQuiz(
+      savedQuiz.questions,
+      answers,
+      savedQuiz.stockName || ticker,
       scanSummary?.risk_level ?? null
     );
 
@@ -101,35 +90,19 @@ export async function POST(request: NextRequest) {
         tipSource: tipSource ?? null,
         scanRiskLevel: scanSummary?.risk_level ?? null,
         scanFlags: scanSummary?.flags ?? null,
-        // Session reference: the backend's quiz_id when it echoes one,
-        // else the sg_vid visitor id (quizzes are session-keyed).
-        quizId: quizId ?? visitorId,
+        quizId: quizId ?? savedQuiz.quizId,
         answers,
         score: graded.score,
         total: graded.total,
-        // Prefer the API's own level/verdict (new shape); fall back to an
-        // older conclusion payload or the compact quiz-only shape.
-        verdictCode: graded.level ?? verdict,
-        result: graded.level
-          ? {
-              level: graded.level,
-              verdict: graded.verdict ?? "",
-              strengths: graded.strengths ?? [],
-              gaps: graded.gaps ?? [],
-              feedback: graded.feedback ?? [],
-              percentage: graded.percentage ?? null,
-            }
-          : graded.conclusion
-            ? {
-                per_question: graded.per_question ?? [],
-                conclusion: graded.conclusion,
-                verdict_title:
-                  graded.verdict_title ?? graded.conclusion.headline,
-              }
-            : {
-                eligible: graded.eligible,
-                correct_answers: graded.correct_answers,
-              },
+        verdictCode: graded.level,
+        result: {
+          level: graded.level,
+          verdict: graded.verdictText,
+          strengths: graded.strengths,
+          gaps: graded.gaps,
+          feedback: graded.feedback,
+          percentage: graded.percentage,
+        },
       })
       .returning({ id: safetyAttempts.id });
 
@@ -146,13 +119,16 @@ export async function POST(request: NextRequest) {
         score: graded.score,
         total: graded.total,
         eligible: graded.eligible,
-        correct_answers: graded.correct_answers,
-        verdict,
+        correct_answers: graded.correctAnswers,
+        verdict: graded.verdict,
       },
       { headers: { "cache-control": "no-store" } }
     );
   } catch (err) {
-    console.error("[/api/safety-quiz/submit] Failed to submit safety quiz:", err);
-    return mapBackendError(err);
+    console.error("[/api/safety-quiz/submit] Failed to evaluate quiz submission:", err);
+    return NextResponse.json(
+      { error: "submission_failed", message: "Failed to grade quiz submission." },
+      { status: 500 }
+    );
   }
 }

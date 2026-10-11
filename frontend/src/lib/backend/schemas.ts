@@ -59,8 +59,18 @@ export const quizQuestionSchema = z.object({
 });
 export type QuizQuestion = z.infer<typeof quizQuestionSchema>;
 
+export interface BackendQuizQuestion {
+  category?: string;
+  question: string;
+  options: QuizQuestion["options"];
+  correct_answer: string;
+  explanation?: string;
+}
+
 export interface QuizStartResponse {
   questions: QuizQuestion[];
+  /** Full questions including correct_answer and explanation for secure database storage. */
+  fullQuestions?: BackendQuizQuestion[];
   /** Backend stock name when it echoes one — not required. */
   stockName?: string;
   /** Session quiz id when the backend echoes one (README contract). */
@@ -216,6 +226,7 @@ export function normalizeQuizStart(raw: unknown): QuizStartResponse | null {
   }
 
   const questions: QuizQuestion[] = [];
+  const fullQuestions: BackendQuizQuestion[] = [];
   for (const item of questionsRaw) {
     const record = asRecord(item);
     if (!record) return null;
@@ -231,14 +242,38 @@ export function normalizeQuizStart(raw: unknown): QuizStartResponse | null {
       }
     }
     if (!options) return null;
+    const cleanQ = cleanMathText((record[textKey] as string).trim());
+    const cleanOpts = {
+      A: cleanMathText(options.A),
+      B: cleanMathText(options.B),
+      C: cleanMathText(options.C),
+      D: cleanMathText(options.D),
+    };
     questions.push({
-      question: cleanMathText((record[textKey] as string).trim()),
-      options: {
-        A: cleanMathText(options.A),
-        B: cleanMathText(options.B),
-        C: cleanMathText(options.C),
-        D: cleanMathText(options.D),
-      },
+      question: cleanQ,
+      options: cleanOpts,
+    });
+
+    const rawAns =
+      firstNonEmptyString(record.correct_answer) ??
+      firstNonEmptyString(record.correctAnswer) ??
+      firstNonEmptyString(record.answer);
+    const matchedLetter = rawAns?.toUpperCase().match(/^([A-D])$/)?.[1] ?? "A";
+    const explanation =
+      firstNonEmptyString(record.explanation) ??
+      firstNonEmptyString(record.reason) ??
+      "";
+    const category =
+      firstNonEmptyString(record.category) ??
+      firstNonEmptyString(record.topic) ??
+      undefined;
+
+    fullQuestions.push({
+      category,
+      question: cleanQ,
+      options: cleanOpts,
+      correct_answer: matchedLetter,
+      explanation,
     });
   }
 
@@ -256,6 +291,7 @@ export function normalizeQuizStart(raw: unknown): QuizStartResponse | null {
     firstNonEmptyString(top.topic) ?? firstNonEmptyString(container.topic);
   return {
     questions,
+    fullQuestions,
     ...(echoed ? { stockName: echoed } : {}),
     ...(quizId ? { quizId } : {}),
     ...(topic ? { topic } : {}),

@@ -209,6 +209,36 @@ export const chatMessages = pgTable(
   ]
 );
 
+/** Generated quiz questions and correct answers stored securely in Neon. */
+export interface SavedQuizQuestion {
+  category?: string;
+  question: string;
+  options: Record<string, string>;
+  correct_answer: string;
+  explanation?: string;
+}
+
+export const safetyQuizzes = pgTable(
+  "safety_quizzes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sessionId: text("session_id").notNull(),
+    quizId: text("quiz_id").notNull(),
+    visitorId: text("visitor_id").notNull(),
+    ticker: text("ticker").notNull(),
+    stockName: text("stock_name"),
+    questions: jsonb("questions").$type<SavedQuizQuestion[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("safety_quizzes_session_id_idx").on(table.sessionId),
+    index("safety_quizzes_quiz_id_idx").on(table.quizId),
+    index("safety_quizzes_visitor_id_idx").on(table.visitorId),
+  ]
+);
+
 export type FomoProfile = typeof fomoProfiles.$inferSelect;
 export type NewFomoProfile = typeof fomoProfiles.$inferInsert;
 export type SafetyAttempt = typeof safetyAttempts.$inferSelect;
@@ -219,3 +249,6 @@ export type HoldingRow = typeof holdings.$inferSelect;
 export type NewHoldingRow = typeof holdings.$inferInsert;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type NewChatMessage = typeof chatMessages.$inferInsert;
+export type SafetyQuiz = typeof safetyQuizzes.$inferSelect;
+export type NewSafetyQuiz = typeof safetyQuizzes.$inferInsert;
+

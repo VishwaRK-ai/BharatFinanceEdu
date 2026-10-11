@@ -1,6 +1,14 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { safetyAttempts, type SafetyAttemptResultPayload } from "@/db/schema";
+import {
+  safetyAttempts,
+  safetyQuizzes,
+  type SafetyAttemptFeedback,
+  type SafetyAttemptGap,
+  type SafetyAttemptResultPayload,
+  type SafetyQuiz,
+  type SavedQuizQuestion,
+} from "@/db/schema";
 import type { RiskLevel } from "@/lib/scan/types";
 
 /**
@@ -256,7 +264,229 @@ function readEligible(
 }
 
 function readCorrectAnswers(result: SafetyAttemptResultPayload): string[] {
-  return "correct_answers" in result ? result.correct_answers : [];
+  if ("correct_answers" in result && Array.isArray(result.correct_answers)) {
+    return result.correct_answers;
+  }
+  if ("feedback" in result && Array.isArray(result.feedback)) {
+    return result.feedback.map((f) => f.correct_answer);
+  }
+  if ("per_question" in result && Array.isArray(result.per_question)) {
+    return result.per_question.map((q) => q.correct_answer);
+  }
+  return [];
+}
+
+const LEVEL_ADVICE: Record<string, string> = {
+  "Well Prepared":
+    "Your understanding matches the risks of this stock; proceed only with disciplined position sizing.",
+  "Partially Prepared":
+    "Revise the weak areas below first, and if you still invest, start with a small position.",
+  "Not Yet Ready":
+    "Avoid buying for now. SEBI advises against investing in what you do not understand; learn the points below first.",
+};
+
+export function buildVerdict(
+  name: string,
+  level: string,
+  score: number,
+  total: number,
+  strengths: string[],
+  gaps: string[]
+): string {
+  const parts = [
+    `${level} to invest in ${name}: you answered ${score} of ${total} correctly.`,
+  ];
+  if (strengths.length > 0) {
+    parts.push(`You show sound understanding of ${strengths.join(", ")}.`);
+  }
+  if (gaps.length > 0) {
+    parts.push(`You need to work on ${gaps.join(", ")} before committing money.`);
+  }
+  parts.push(LEVEL_ADVICE[level] ?? LEVEL_ADVICE["Partially Prepared"]);
+  return parts.join(" ");
+}
+
+let tableEnsured = false;
+export async function ensureSafetyQuizzesTable(): Promise<void> {
+  if (tableEnsured) return;
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "safety_quizzes" (
+        "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "session_id" text NOT NULL,
+        "quiz_id" text NOT NULL,
+        "visitor_id" text NOT NULL,
+        "ticker" text NOT NULL,
+        "stock_name" text,
+        "questions" jsonb NOT NULL,
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS "safety_quizzes_session_id_idx" ON "safety_quizzes" ("session_id");
+      CREATE INDEX IF NOT EXISTS "safety_quizzes_quiz_id_idx" ON "safety_quizzes" ("quiz_id");
+      CREATE INDEX IF NOT EXISTS "safety_quizzes_visitor_id_idx" ON "safety_quizzes" ("visitor_id");
+    `);
+    tableEnsured = true;
+  } catch (err) {
+    console.warn("[safety] ensureSafetyQuizzesTable error:", err);
+  }
+}
+
+export async function saveSafetyQuiz(params: {
+  sessionId: string;
+  quizId: string;
+  visitorId: string;
+  ticker: string;
+  stockName?: string | null;
+  questions: SavedQuizQuestion[];
+}): Promise<void> {
+  await ensureSafetyQuizzesTable();
+  await db.insert(safetyQuizzes).values({
+    sessionId: params.sessionId,
+    quizId: params.quizId,
+    visitorId: params.visitorId,
+    ticker: params.ticker,
+    stockName: params.stockName ?? null,
+    questions: params.questions,
+  });
+}
+
+export async function getSavedQuiz(params: {
+  quizId?: string | null;
+  visitorId: string;
+  ticker?: string;
+}): Promise<SafetyQuiz | null> {
+  await ensureSafetyQuizzesTable();
+  if (params.quizId) {
+    const rows = await db
+      .select()
+      .from(safetyQuizzes)
+      .where(eq(safetyQuizzes.quizId, params.quizId))
+      .limit(1);
+    if (rows[0]) return rows[0];
+  }
+
+  if (params.ticker) {
+    const rows = await db
+      .select()
+      .from(safetyQuizzes)
+      .where(
+        and(
+          eq(safetyQuizzes.visitorId, params.visitorId),
+          eq(safetyQuizzes.ticker, params.ticker)
+        )
+      )
+      .orderBy(desc(safetyQuizzes.createdAt))
+      .limit(1);
+    if (rows[0]) return rows[0];
+  }
+
+  const rows = await db
+    .select()
+    .from(safetyQuizzes)
+    .where(eq(safetyQuizzes.visitorId, params.visitorId))
+    .orderBy(desc(safetyQuizzes.createdAt))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export function gradeQuiz(
+  questions: SavedQuizQuestion[],
+  answers: string[],
+  stockName: string,
+  scanRisk?: RiskLevel | null
+): {
+  score: number;
+  total: number;
+  percentage: number;
+  level: string;
+  eligible: boolean;
+  verdict: Verdict;
+  verdictText: string;
+  strengths: string[];
+  gaps: SafetyAttemptGap[];
+  feedback: SafetyAttemptFeedback[];
+  correctAnswers: string[];
+} {
+  const total = questions.length;
+  let score = 0;
+  const feedback: SafetyAttemptFeedback[] = [];
+  const categories: Record<
+    string,
+    { correct: number; total: number; to_learn: string[] }
+  > = {};
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const userAns = (answers[i] ?? "").trim().toUpperCase();
+    const isCorrect = userAns === (q.correct_answer ?? "").trim().toUpperCase();
+    if (isCorrect) score += 1;
+
+    const cat = q.category || `Topic ${i + 1}`;
+    feedback.push({
+      category: cat,
+      question: q.question,
+      user_answer: userAns,
+      correct_answer: q.correct_answer,
+      is_correct: isCorrect,
+      explanation: q.explanation ?? "",
+    });
+
+    if (!categories[cat]) {
+      categories[cat] = { correct: 0, total: 0, to_learn: [] };
+    }
+    categories[cat].total += 1;
+    if (isCorrect) {
+      categories[cat].correct += 1;
+    } else if (q.explanation) {
+      categories[cat].to_learn.push(q.explanation);
+    }
+  }
+
+  const percentage = total > 0 ? Math.round((100 * score) / total * 10) / 10 : 0;
+  const level =
+    percentage >= 80
+      ? "Well Prepared"
+      : percentage >= 50
+        ? "Partially Prepared"
+        : "Not Yet Ready";
+
+  const strengths = Object.entries(categories)
+    .filter(([_, c]) => c.correct === c.total)
+    .map(([cat]) => cat);
+
+  const gaps: SafetyAttemptGap[] = Object.entries(categories)
+    .filter(([_, c]) => c.correct < c.total)
+    .map(([cat, c]) => ({
+      category: cat,
+      correct: c.correct,
+      total: c.total,
+      what_to_learn: c.to_learn,
+    }));
+
+  const eligible = percentage >= 80;
+  const verdict = verdictFor(score, total, scanRisk);
+  const verdictText = buildVerdict(
+    stockName,
+    level,
+    score,
+    total,
+    strengths,
+    gaps.map((g) => g.category)
+  );
+
+  return {
+    score,
+    total,
+    percentage,
+    level,
+    eligible,
+    verdict,
+    verdictText,
+    strengths,
+    gaps,
+    feedback,
+    correctAnswers: questions.map((q) => q.correct_answer),
+  };
 }
 
 /** Current visitor's attempts, newest first. */
