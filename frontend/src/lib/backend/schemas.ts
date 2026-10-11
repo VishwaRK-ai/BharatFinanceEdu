@@ -169,6 +169,7 @@ function normalizeOptions(raw: unknown): QuizQuestion["options"] | null {
   if (Array.isArray(raw)) {
     const texts = raw.filter((value): value is string => typeof value === "string");
     if (texts.length >= 4) return { A: texts[0], B: texts[1], C: texts[2], D: texts[3] };
+    if (texts.length === 3) return { A: texts[0], B: texts[1], C: texts[2], D: "None of the above" };
     return null;
   }
   const record = asRecord(raw);
@@ -187,8 +188,12 @@ function normalizeOptions(raw: unknown): QuizQuestion["options"] | null {
   const c = byLetter.get("C");
   const d = byLetter.get("D");
   if (a && b && c && d) return { A: a, B: b, C: c, D: d };
+  if (a && b && c) return { A: a, B: b, C: c, D: "None of the above" };
   if (entries.length >= 4) {
     return { A: entries[0][1], B: entries[1][1], C: entries[2][1], D: entries[3][1] };
+  }
+  if (entries.length === 3) {
+    return { A: entries[0][1], B: entries[1][1], C: entries[2][1], D: "None of the above" };
   }
   return null;
 }
@@ -197,10 +202,14 @@ function normalizeOptions(raw: unknown): QuizQuestion["options"] | null {
  * Normalize an untyped POST /quiz/generate 200 body, or null when unusable.
  * The live backend v2 shape puts the questions in a top-level `quiz` ARRAY:
  *   { session_id, ticker, beta, language, quiz: [ { question, options, … } ] }
- * We also accept a top-level `questions` array (README shape) and one level
- * of object wrapper (`{ quiz: { questions } }`, `data`, `result`).
+ * We also accept a top-level `questions` array (README shape), a direct array of
+ * questions, and one level of object wrapper (`{ quiz: { questions } }`, `data`, `result`).
  */
 export function normalizeQuizStart(raw: unknown): QuizStartResponse | null {
+  if (Array.isArray(raw)) {
+    return normalizeQuizStart({ quiz: raw });
+  }
+
   const top = asRecord(raw);
   if (!top) return null;
 

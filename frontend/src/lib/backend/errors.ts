@@ -50,8 +50,9 @@ export function mapBackendError(err: unknown): NextResponse {
           ? 410
           : 502;
 
+  const detail = err instanceof Error ? err.message : String(err);
   return NextResponse.json(
-    { error: kind, message: FALLBACK_MESSAGES[kind] },
+    { error: kind, message: FALLBACK_MESSAGES[kind], detail },
     { status }
   );
 }

@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { safetyQuizStart } from "@/lib/backend/client";
-import { mapBackendError } from "@/lib/backend/errors";
+import { BackendError, mapBackendError } from "@/lib/backend/errors";
 import { scanSummarySchema } from "@/lib/backend/schemas";
 import { db } from "@/db";
 import { fomoProfiles } from "@/db/schema";
@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
 
   const stockName = matchQuizStock(parsed.data.ticker);
   if (!stockName) {
+    console.warn(`[/api/safety-quiz] Unsupported stock requested: ${parsed.data.ticker}`);
     return NextResponse.json(
       { error: "unsupported_stock", message: "This stock has no safety quiz." },
       { status: 400 }
@@ -89,6 +90,7 @@ export async function POST(request: NextRequest) {
   const fomo = await loadFomo(visitorId);
 
   try {
+    console.log(`[/api/safety-quiz] Initiating quiz generation: ticker=${parsed.data.ticker}, targetStock=${stockName}, locale=${parsed.data.locale}, visitorId=${visitorId}`);
     const quiz = await safetyQuizStart({
       sessionId: visitorId,
       targetStock: stockName,
@@ -108,6 +110,8 @@ export async function POST(request: NextRequest) {
             correct_answer: "A",
           }));
 
+    console.log(`[/api/safety-quiz] Quiz generated. Saving ${questionsToSave.length} questions to Neon DB with quizId=${quizId}...`);
+
     // Securely persist complete quiz with correct answers to Neon PostgreSQL
     await saveSafetyQuiz({
       sessionId: visitorId,
@@ -117,6 +121,8 @@ export async function POST(request: NextRequest) {
       stockName: quiz.stockName ?? stockName,
       questions: questionsToSave,
     });
+
+    console.log(`[/api/safety-quiz] Successfully persisted quiz ${quizId}. Returning sanitized questions to browser.`);
 
     // Return sanitized quiz payload to browser (correct answers never reach the client)
     return NextResponse.json(
@@ -131,7 +137,13 @@ export async function POST(request: NextRequest) {
       }
     );
   } catch (err) {
-    console.error("[/api/safety-quiz] Failed to start safety quiz:", err);
+    if (err instanceof BackendError) {
+      console.error(
+        `[/api/safety-quiz] Backend error during quiz generation: status=${err.status}, kind=${err.kind}, message=${err.message}`
+      );
+    } else {
+      console.error("[/api/safety-quiz] Unexpected failure during quiz generation:", err);
+    }
     return mapBackendError(err);
   }
 }

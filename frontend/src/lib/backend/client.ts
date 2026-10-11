@@ -190,18 +190,23 @@ async function callBackend(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const targetUrl = `${baseUrl.replace(/\/+$/, "")}${path}`;
 
   try {
     let response: Response;
     try {
-      response = await fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, {
+      console.log(`[backend-client] Fetching ${targetUrl} (method: ${body === undefined ? "GET" : "POST"})...`);
+      response = await fetch(targetUrl, {
         method: body === undefined ? "GET" : "POST",
         headers: {
           ...(body !== undefined
             ? { "content-type": "application/json" }
             : {}),
           ...(env.LLM_BACKEND_API_KEY
-            ? { "x-api-key": env.LLM_BACKEND_API_KEY }
+            ? {
+                "x-api-key": env.LLM_BACKEND_API_KEY,
+                authorization: `Bearer ${env.LLM_BACKEND_API_KEY}`,
+              }
             : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -209,25 +214,40 @@ async function callBackend(
         cache: "no-store",
       });
     } catch (err) {
-      if (isAbortError(err)) throw new BackendError("timeout");
-      throw new BackendError("unreachable");
+      console.error(`[backend-client] Network failure on ${targetUrl}:`, err);
+      if (isAbortError(err)) throw new BackendError("timeout", `Timeout after ${timeoutMs}ms reaching ${targetUrl}`);
+      throw new BackendError("unreachable", `Could not connect to backend at ${targetUrl}`);
+    }
+
+    // Fallback: If /quiz/generate returned 404, retry with legacy /quiz endpoint
+    if (response.status === 404 && path === "/quiz/generate") {
+      console.warn(`[backend-client] /quiz/generate returned 404. Retrying with /quiz...`);
+      return callBackend("/quiz", body, timeoutMs);
     }
 
     if (response.status === 401 || response.status === 403) {
-      console.error(`[backend-client] Unauthorized (status ${response.status}) on ${path}`);
-      throw new BackendError("unauthorized", undefined, response.status);
+      const errText = await response.text().catch(() => "");
+      console.error(
+        `[backend-client] Unauthorized (status ${response.status}) on ${path}. Response body: ${errText}`
+      );
+      throw new BackendError("unauthorized", `Unauthorized on ${path} (status ${response.status}): ${errText}`, response.status);
     }
+
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
-      console.error(`[backend-client] Upstream error on ${path} (status ${response.status}):`, errText);
-      throw new BackendError("upstream", undefined, response.status);
+      console.error(
+        `[backend-client] Upstream HTTP error on ${path} -> Status: ${response.status} ${response.statusText}\nResponse body: ${errText}`
+      );
+      throw new BackendError("upstream", `Upstream error on ${path} (status ${response.status}): ${errText}`, response.status);
     }
 
     try {
-      return await response.json();
+      const json = await response.json();
+      console.log(`[backend-client] Received 200 OK from ${path}`);
+      return json;
     } catch (parseErr) {
       console.error(`[backend-client] Failed to parse JSON response on ${path}:`, parseErr);
-      throw new BackendError("bad_response", undefined, response.status);
+      throw new BackendError("bad_response", `Invalid JSON returned by ${path}`, response.status);
     }
   } finally {
     clearTimeout(timer);
@@ -258,22 +278,24 @@ export async function safetyQuizStart(input: {
 
   await ensureLanguage(input.sessionId, input.locale);
 
-  const data = await callBackend(
-    "/quiz/generate",
-    {
-      session_id: input.sessionId,
-      target_stock: input.targetStock,
-      language: input.locale,
-      ...(input.tipSource ? { tip_source: input.tipSource } : {}),
-      ...(input.scanSummary ? { scan_summary: input.scanSummary } : {}),
-      ...(input.fomo
-        ? { fomo_score: input.fomo.score, fomo_band: input.fomo.band }
-        : {}),
-    },
-    QUIZ_START_TIMEOUT_MS
-  );
+  console.log(`[safetyQuizStart] Calling backend to generate quiz for stock=${input.targetStock}, locale=${input.locale}`);
+  const payload = {
+    session_id: input.sessionId,
+    target_stock: input.targetStock,
+    language: input.locale,
+    ...(input.tipSource ? { tip_source: input.tipSource } : {}),
+    ...(input.scanSummary ? { scan_summary: input.scanSummary } : {}),
+    ...(input.fomo
+      ? { fomo_score: input.fomo.score, fomo_band: input.fomo.band }
+      : {}),
+  };
+
+  const data = await callBackend("/quiz/generate", payload, QUIZ_START_TIMEOUT_MS);
   const normalized = normalizeQuizStart(data);
-  if (!normalized) throw new BackendError("bad_response");
+  if (!normalized) {
+    console.error(`[safetyQuizStart] normalizeQuizStart failed! Raw backend payload was:`, JSON.stringify(data));
+    throw new BackendError("bad_response", "Failed to normalize quiz payload from backend");
+  }
   return normalized;
 }
 
