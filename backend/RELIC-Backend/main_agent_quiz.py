@@ -16,8 +16,15 @@ api_pass = os.getenv("AZURE_API_PASS")
 
 client = Client(api_url, auth=(api_user, api_pass))
 
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+vector_db = None
+
+def get_vector_db():
+    global vector_db
+    if vector_db is not None:
+        return vector_db
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+    return vector_db
 
 # --- 2. INVESTOR RISK QUIZ ---
 def run_investor_quiz():
@@ -47,7 +54,8 @@ def run_investor_quiz():
 # --- 3. CORE AGENTIC PIPELINE ---
 def generate_personalized_advice(user_question, risk_profile):
     print(f"\n[AGENT] Searching SEBI/RBI Guidelines in ChromaDB...")
-    docs = vector_db.similarity_search(user_question, k=2)
+    db = get_vector_db()
+    docs = db.similarity_search(user_question, k=2) if db else []
     rag_context = "\n".join([doc.page_content for doc in docs])
     
     print("[AGENT] Checking for stock tickers to fetch live data...")

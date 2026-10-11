@@ -195,11 +195,27 @@ class FomoRequest(BaseModel):
     demo_mode: bool = False
 
 
+def get_vector_db() -> Optional[Any]:
+    global vector_db
+    if vector_db is not None:
+        return vector_db
+    try:
+        logger.info("Lazy-loading HuggingFaceEmbeddings and ChromaDB...")
+        embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+        vector_db = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+        logger.info("ChromaDB loaded successfully.")
+    except Exception:
+        logger.exception("ChromaDB unavailable, continuing without RAG")
+        vector_db = None
+    return vector_db
+
+
 def get_rag_context(query: str, k: int = 3) -> str:
-    if vector_db is None:
+    db = get_vector_db()
+    if db is None:
         return ""
     try:
-        docs = vector_db.similarity_search(query, k=k)
+        docs = db.similarity_search(query, k=k)
         return "\n".join(doc.page_content for doc in docs)
     except Exception:
         logger.exception("RAG lookup failed")
@@ -496,12 +512,6 @@ async def monitor_market() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global vector_db
-    try:
-        embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-        vector_db = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
-    except Exception:
-        logger.exception("ChromaDB unavailable, continuing without RAG")
     monitor = asyncio.create_task(monitor_market())
     yield
     monitor.cancel()

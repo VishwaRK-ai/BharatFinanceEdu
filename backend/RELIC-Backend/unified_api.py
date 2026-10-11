@@ -40,14 +40,7 @@ client = Client(api_url, auth=(api_user, api_pass))
 quiz_sessions: Dict[str, List[Dict[str, Any]]] = {}
 chat_history: Dict[str, List[Dict[str, str]]] = {}
 
-# Initialize Embeddings & Local ChromaDB (SEBI/RBI Data)
-try:
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
-    print("✅ Local ChromaDB loaded successfully.")
-except Exception as e:
-    print(f"⚠️ Warning: Could not load ChromaDB. Error: {e}")
-    vector_db = None
+vector_db = None
 
 
 # =====================================================================
@@ -79,11 +72,26 @@ class ChatRequest(BaseModel):
 # 3. CORE HELPER FUNCTIONS (RAG + YFINANCE + LLM BRIDGE)
 # =====================================================================
 
+def get_vector_db():
+    global vector_db
+    if vector_db is not None:
+        return vector_db
+    try:
+        print("Lazy-loading HuggingFaceEmbeddings and ChromaDB...")
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+        print("✅ Local ChromaDB loaded successfully.")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not load ChromaDB. Error: {e}")
+        vector_db = None
+    return vector_db
+
 def get_rag_context(query: str, k: int = 3) -> str:
-    if not vector_db:
+    db = get_vector_db()
+    if not db:
         return ""
     try:
-        docs = vector_db.similarity_search(query, k=k)
+        docs = db.similarity_search(query, k=k)
         return "\n".join([doc.page_content for doc in docs])
     except Exception as e:
         print(f"RAG Error: {e}")
