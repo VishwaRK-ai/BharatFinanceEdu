@@ -8,11 +8,10 @@ from asr_and_tts import run_multilingual_tts
 TTS_LANGUAGE = "mr"
 
 api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
-api_user = os.getenv("AZURE_API_USER", "admin")
-api_pass = os.getenv("AZURE_API_PASS", "BharatFinance2026!")
+api_user = os.getenv("AZURE_API_USER")
+api_pass = os.getenv("AZURE_API_PASS")
 
-client_auth = (api_user, api_pass) if api_user and api_pass else None
-client = Client(api_url, auth=client_auth)
+client = Client(api_url, auth=(api_user, api_pass))
 
 embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
 vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)

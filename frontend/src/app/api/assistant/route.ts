@@ -85,12 +85,16 @@ export async function POST(request: NextRequest) {
   try {
     let replyText = "";
     try {
-      const authHeader = `Basic ${Buffer.from("admin:BharatFinance2026!").toString("base64")}`;
+      const apiUser = process.env.AZURE_API_USER || "admin";
+      const apiPass = process.env.AZURE_API_PASS || "BharatFinance2026!";
+      const apiUrl = process.env.AZURE_API_URL || "http://20.41.114.241:7860/api/predict";
+
+      const authHeader = `Basic ${Buffer.from(`${apiUser}:${apiPass}`).toString("base64")}`;
       const promptText = chatHistory.length > 0
         ? `${chatHistory.map((t) => `${t.role}: ${t.content}`).join("\n")}\nuser: ${message}`
         : message;
 
-      const res = await fetch("http://20.41.114.241:7860/api/predict", {
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

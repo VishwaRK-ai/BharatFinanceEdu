@@ -7,6 +7,12 @@ from pydantic import BaseModel
 import yfinance as yf
 from gradio_client import Client
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Handle Protobuf/LangChain compatibility warnings
 os.environ["TEMPORARILY_DISABLE_PROTOBUF_VERSION_CHECK"] = "true"
 
@@ -23,11 +29,10 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 # Render will inject these securely at runtime
 api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
-api_user = os.getenv("AZURE_API_USER", "admin")
-api_pass = os.getenv("AZURE_API_PASS", "BharatFinance2026!")
+api_user = os.getenv("AZURE_API_USER")
+api_pass = os.getenv("AZURE_API_PASS")
 
-client_auth = (api_user, api_pass) if api_user and api_pass else None
-client = Client(api_url, auth=client_auth)
+client = Client(api_url, auth=(api_user, api_pass))
 
 # In-memory storage (Replace with Redis/PostgreSQL in production)
 quiz_sessions: Dict[str, List[Dict[str, Any]]] = {}

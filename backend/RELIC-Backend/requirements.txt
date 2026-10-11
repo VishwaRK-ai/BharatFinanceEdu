@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+gradio_client
+pydantic
+python-multipart
+yfinance
+pillow
+pytesseract
+pandas
+gtts
+langchain-chroma
+langchain-community
+langchain-huggingface
+python-dotenv

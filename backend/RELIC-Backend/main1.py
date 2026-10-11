@@ -18,6 +18,12 @@ from gradio_client import Client
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ValidationError, model_validator
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 os.environ["TEMPORARILY_DISABLE_PROTOBUF_VERSION_CHECK"] = "true"
 
 try:
@@ -32,10 +38,10 @@ from live_stock_api import extract_ticker, get_live_stock_data
 from test_ocr_security import analyze_image
 from volatility_alert import check_volatility
 
-# Render / environment secrets for Azure Gradio VM
+# Render will inject these securely at runtime
 api_url = os.getenv("AZURE_API_URL", "http://20.41.114.241:7860/")
-api_user = os.getenv("AZURE_API_USER", "admin")
-api_pass = os.getenv("AZURE_API_PASS", "BharatFinance2026!")
+api_user = os.getenv("AZURE_API_USER")
+api_pass = os.getenv("AZURE_API_PASS")
 
 COLAB_API_URL = api_url
 COLAB_AUTH = (api_user, api_pass) if api_user and api_pass else None
