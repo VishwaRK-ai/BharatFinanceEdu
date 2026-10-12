@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import createIntlMiddleware from "next-intl/middleware";
 import { isLocale, routing, type Locale } from "@/i18n/routing";
 import { isValidVisitorId, VISITOR_COOKIE } from "@/lib/visitor";
-import { LANG_COOKIE } from "@/lib/lang-cookie";
+import { LANG_COOKIE, INTL_LOCALE_COOKIE } from "@/lib/lang-cookie";
 
 /**
  * Request proxy (Next.js 16: the old `middleware.ts` is now `proxy.ts`).
@@ -70,15 +70,41 @@ export function proxy(request: NextRequest) {
 
     // --- 2. First-run language gate --------------------------------------
     const locale = appPathLocale(pathname);
-    const lang = request.cookies.get(LANG_COOKIE)?.value;
+    const cookieLang = request.cookies.get(LANG_COOKIE)?.value;
+    const intlLang =
+      request.cookies.get(INTL_LOCALE_COOKIE)?.value ||
+      request.cookies.get("NEXT_LOCALE")?.value;
+    const headerLang = request.headers.get("x-locale");
 
-    if (locale && !isLocale(lang)) {
+    const activeLang = isLocale(cookieLang)
+      ? cookieLang
+      : isLocale(intlLang)
+        ? intlLang
+        : isLocale(headerLang)
+          ? headerLang
+          : null;
+
+    if (locale && !activeLang) {
       response = NextResponse.redirect(
         new URL(`/${locale}/select-language`, request.url)
+      );
+      response.headers.set(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate, proxy-revalidate"
       );
     } else {
       // --- 3. Delegate to next-intl ---------------------------------------
       response = intlMiddleware(request);
+
+      // Sync sg_lang cookie to response if missing but activeLang is known
+      if (activeLang && !isLocale(cookieLang)) {
+        response.cookies.set(LANG_COOKIE, activeLang, {
+          path: "/",
+          maxAge: VISITOR_MAX_AGE,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+        });
+      }
     }
   }
 

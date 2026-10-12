@@ -29,7 +29,10 @@ export function readLangCookie(): Locale | null {
  */
 export function setLanguageCookies(locale: Locale): void {
   if (!isLocale(locale)) return;
-  const attrs = `path=/; max-age=${YEAR}; samesite=lax`;
+  const isSecure =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+  const secureAttr = isSecure ? "; Secure" : "";
+  const attrs = `path=/; max-age=${YEAR}; SameSite=Lax${secureAttr}`;
   document.cookie = `${LANG_COOKIE}=${locale}; ${attrs}`;
   document.cookie = `${INTL_LOCALE_COOKIE}=${locale}; ${attrs}`;
 }

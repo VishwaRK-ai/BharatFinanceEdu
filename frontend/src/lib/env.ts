@@ -20,20 +20,31 @@ const envSchema = z
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required (Neon pooled string)"),
     DIRECT_URL: z.string().min(1, "DIRECT_URL is required (Neon direct string)"),
     LLM_BACKEND_URL: z.string().optional().transform(sanitizeUrl),
+    NEXT_PUBLIC_BACKEND_URL: z.string().optional().transform(sanitizeUrl),
+    BACKEND_URL: z.string().optional().transform(sanitizeUrl),
     LLM_BACKEND_API_KEY: z.string().optional(),
     USE_MOCK_BACKEND: z.enum(["true", "false"]).optional(),
     NEXT_PUBLIC_APP_URL: z.string().default("http://localhost:3000"),
   })
   .transform((val) => {
+    const rawBackendUrl =
+      val.LLM_BACKEND_URL ||
+      val.NEXT_PUBLIC_BACKEND_URL ||
+      val.BACKEND_URL ||
+      sanitizeUrl(process.env.NEXT_PUBLIC_BACKEND_URL) ||
+      sanitizeUrl(process.env.BACKEND_URL) ||
+      sanitizeUrl(process.env.LLM_BACKEND_URL);
+
     // If USE_MOCK_BACKEND is explicitly set, respect it.
-    // If not set, but LLM_BACKEND_URL is provided, default to "false" (send requests to Render).
+    // If not set, but any backend URL is provided, default to "false" (send requests to Render).
     // Otherwise, default to "true" (local mock backend).
     let effectiveUseMock = val.USE_MOCK_BACKEND;
     if (!effectiveUseMock) {
-      effectiveUseMock = val.LLM_BACKEND_URL ? "false" : "true";
+      effectiveUseMock = rawBackendUrl ? "false" : "true";
     }
     return {
       ...val,
+      LLM_BACKEND_URL: rawBackendUrl,
       USE_MOCK_BACKEND: effectiveUseMock,
     };
   })
@@ -43,7 +54,7 @@ const envSchema = z
         code: "custom",
         path: ["LLM_BACKEND_URL"],
         message:
-          "LLM_BACKEND_URL is required when USE_MOCK_BACKEND is \"false\". Set LLM_BACKEND_URL to your Render backend URL in Vercel.",
+          "LLM_BACKEND_URL or NEXT_PUBLIC_BACKEND_URL is required when USE_MOCK_BACKEND is \"false\". Set NEXT_PUBLIC_BACKEND_URL or LLM_BACKEND_URL to your Render backend URL in Vercel.",
       });
     }
   });

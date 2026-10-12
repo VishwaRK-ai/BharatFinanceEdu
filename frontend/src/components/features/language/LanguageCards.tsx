@@ -31,14 +31,26 @@ export function LanguageCards({
   const pathname = usePathname();
   const [pending, setPending] = React.useState<Locale | null>(null);
 
-  function choose(locale: Locale) {
+  async function choose(locale: Locale) {
     if (pending) return;
     setPending(locale);
     setLanguageCookies(locale);
+
+    try {
+      await fetch("/api/language", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ locale }),
+      });
+    } catch {
+      // Best-effort server cookie set
+    }
+
     if (stay) {
       router.replace(pathname, { locale });
     } else {
-      router.replace("/dashboard", { locale });
+      // Full navigation ensures cookies are attached to HTTP request headers and bypasses any stale RSC prefetch cache
+      window.location.href = `/${locale}/dashboard`;
     }
   }
 
