@@ -102,12 +102,22 @@ async function ensureLanguage(sessionId: string, locale: Locale): Promise<void> 
 export async function assistant(input: AssistantInput): Promise<AssistantResponse> {
   const env = getServerEnv();
 
+  console.log(
+    `[Vercel->Render] assistant chat invoked: sessionId=${input.sessionId}, locale=${input.locale}, USE_MOCK_BACKEND=${env.USE_MOCK_BACKEND}, LLM_BACKEND_URL=${env.LLM_BACKEND_URL || "(not set)"}`
+  );
+
   if (env.USE_MOCK_BACKEND === "true") {
+    console.warn(
+      "[Vercel->Render] USE_MOCK_BACKEND is 'true' — bypassing Render and returning mock chat reply."
+    );
     return mockAssistant(input);
   }
 
   const baseUrl = env.LLM_BACKEND_URL;
   if (!baseUrl) {
+    console.error(
+      "[Vercel->Render] FATAL: LLM_BACKEND_URL is not configured in Vercel environment variables!"
+    );
     throw new BackendError("unreachable", "LLM_BACKEND_URL is not set");
   }
 
@@ -115,16 +125,23 @@ export async function assistant(input: AssistantInput): Promise<AssistantRespons
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ASSISTANT_TIMEOUT_MS);
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const targetUrl = `${cleanBase}/chat`;
+
+  console.log(`[Vercel->Render] Dispatching chat fetch() to exact URL: ${targetUrl}`);
 
   try {
     let response: Response;
     try {
-      response = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat`, {
+      response = await fetch(targetUrl, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           ...(env.LLM_BACKEND_API_KEY
-            ? { "x-api-key": env.LLM_BACKEND_API_KEY }
+            ? {
+                "x-api-key": env.LLM_BACKEND_API_KEY,
+                authorization: `Bearer ${env.LLM_BACKEND_API_KEY}`,
+              }
             : {}),
         },
         body: JSON.stringify({
@@ -137,26 +154,72 @@ export async function assistant(input: AssistantInput): Promise<AssistantRespons
         cache: "no-store",
       });
     } catch (err) {
-      if (isAbortError(err)) throw new BackendError("timeout");
-      throw new BackendError("unreachable");
+      console.error(`[Vercel->Render] Network failure calling ${targetUrl}:`, err);
+      if (isAbortError(err)) throw new BackendError("timeout", `Timeout connecting to ${targetUrl}`);
+      throw new BackendError("unreachable", `Could not connect to ${targetUrl}`);
+    }
+
+    // Fallback: If /chat returned 404, retry with /assistant endpoint
+    if (response.status === 404) {
+      const altUrl = `${cleanBase}/assistant`;
+      console.warn(`[Vercel->Render] /chat returned 404. Retrying with exact URL: ${altUrl}`);
+      try {
+        response = await fetch(altUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(env.LLM_BACKEND_API_KEY
+              ? {
+                  "x-api-key": env.LLM_BACKEND_API_KEY,
+                  authorization: `Bearer ${env.LLM_BACKEND_API_KEY}`,
+                }
+              : {}),
+          },
+          body: JSON.stringify({
+            message: withLanguageInstruction(input.message, input.locale),
+            session_id: input.sessionId,
+            chat_history: input.chatHistory,
+            language: input.locale,
+          }),
+          signal: controller.signal,
+          cache: "no-store",
+        });
+      } catch (err) {
+        console.error(`[Vercel->Render] Network failure calling fallback ${altUrl}:`, err);
+        if (isAbortError(err)) throw new BackendError("timeout", `Timeout connecting to ${altUrl}`);
+        throw new BackendError("unreachable", `Could not connect to ${altUrl}`);
+      }
     }
 
     if (response.status === 401 || response.status === 403) {
+      const errText = await response.text().catch(() => "");
+      console.error(`[Vercel->Render] Unauthorized (status ${response.status}) on ${targetUrl}: ${errText}`);
       throw new BackendError("unauthorized", undefined, response.status);
     }
     if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      console.error(`[Vercel->Render] Upstream error status=${response.status} from ${targetUrl}: ${errText}`);
       throw new BackendError("upstream", undefined, response.status);
     }
 
     let data: unknown;
     try {
       data = await response.json();
+      console.log(`[Vercel->Render] Successfully received 200 OK from Render chat endpoint (${targetUrl})`);
     } catch {
+      console.error(`[Vercel->Render] Failed to parse JSON response from ${targetUrl}`);
       throw new BackendError("bad_response", undefined, response.status);
     }
 
     const parsed = assistantResponseSchema.safeParse(data);
     if (!parsed.success) {
+      if (typeof data === "object" && data !== null && "reply" in data) {
+        return {
+          reply: String((data as { reply: unknown }).reply),
+          rag_sources_used: Boolean((data as { rag_sources_used?: unknown }).rag_sources_used),
+          live_data_used: Boolean((data as { live_data_used?: unknown }).live_data_used),
+        };
+      }
       throw new BackendError("bad_response", undefined, response.status);
     }
     return parsed.data;
@@ -185,17 +248,20 @@ async function callBackend(
 
   const baseUrl = env.LLM_BACKEND_URL;
   if (!baseUrl) {
+    console.error("[Vercel->Render] FATAL: LLM_BACKEND_URL is not set in environment variables!");
     throw new BackendError("unreachable", "LLM_BACKEND_URL is not set");
   }
 
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const targetUrl = `${cleanBase}${path}`;
+  console.log(`[Vercel->Render] Dispatching fetch() to exact Render URL: ${targetUrl} (method: ${body === undefined ? "GET" : "POST"})`);
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const targetUrl = `${baseUrl.replace(/\/+$/, "")}${path}`;
 
   try {
     let response: Response;
     try {
-      console.log(`[backend-client] Fetching ${targetUrl} (method: ${body === undefined ? "GET" : "POST"})...`);
       response = await fetch(targetUrl, {
         method: body === undefined ? "GET" : "POST",
         headers: {
@@ -214,21 +280,22 @@ async function callBackend(
         cache: "no-store",
       });
     } catch (err) {
-      console.error(`[backend-client] Network failure on ${targetUrl}:`, err);
+      console.error(`[Vercel->Render] Network failure connecting to ${targetUrl}:`, err);
       if (isAbortError(err)) throw new BackendError("timeout", `Timeout after ${timeoutMs}ms reaching ${targetUrl}`);
       throw new BackendError("unreachable", `Could not connect to backend at ${targetUrl}`);
     }
 
     // Fallback: If /quiz/generate returned 404, retry with legacy /quiz endpoint
     if (response.status === 404 && path === "/quiz/generate") {
-      console.warn(`[backend-client] /quiz/generate returned 404. Retrying with /quiz...`);
+      const fallbackUrl = `${cleanBase}/quiz`;
+      console.warn(`[Vercel->Render] /quiz/generate returned 404. Retrying with exact URL: ${fallbackUrl}`);
       return callBackend("/quiz", body, timeoutMs);
     }
 
     if (response.status === 401 || response.status === 403) {
       const errText = await response.text().catch(() => "");
       console.error(
-        `[backend-client] Unauthorized (status ${response.status}) on ${path}. Response body: ${errText}`
+        `[Vercel->Render] Unauthorized (status ${response.status}) on ${targetUrl}. Response: ${errText}`
       );
       throw new BackendError("unauthorized", `Unauthorized on ${path} (status ${response.status}): ${errText}`, response.status);
     }
@@ -236,17 +303,17 @@ async function callBackend(
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
       console.error(
-        `[backend-client] Upstream HTTP error on ${path} -> Status: ${response.status} ${response.statusText}\nResponse body: ${errText}`
+        `[Vercel->Render] Upstream HTTP error on ${targetUrl} -> Status: ${response.status} ${response.statusText}\nResponse: ${errText}`
       );
       throw new BackendError("upstream", `Upstream error on ${path} (status ${response.status}): ${errText}`, response.status);
     }
 
     try {
       const json = await response.json();
-      console.log(`[backend-client] Received 200 OK from ${path}`);
+      console.log(`[Vercel->Render] Successfully received 200 OK from Render URL: ${targetUrl}`);
       return json;
     } catch (parseErr) {
-      console.error(`[backend-client] Failed to parse JSON response on ${path}:`, parseErr);
+      console.error(`[Vercel->Render] Failed to parse JSON response from ${targetUrl}:`, parseErr);
       throw new BackendError("bad_response", `Invalid JSON returned by ${path}`, response.status);
     }
   } finally {
@@ -272,13 +339,20 @@ export async function safetyQuizStart(input: {
   fomo?: { score: number; band: string } | null;
 }): Promise<QuizStartResponse> {
   const env = getServerEnv();
+
+  console.log(
+    `[Vercel->Render] safetyQuizStart invoked: targetStock=${input.targetStock}, locale=${input.locale}, USE_MOCK_BACKEND=${env.USE_MOCK_BACKEND}, LLM_BACKEND_URL=${env.LLM_BACKEND_URL || "(not set)"}`
+  );
+
   if (env.USE_MOCK_BACKEND === "true") {
+    console.warn(
+      "[Vercel->Render] USE_MOCK_BACKEND is 'true' — bypassing Render and returning mock quiz."
+    );
     return mockQuizStart(input);
   }
 
   await ensureLanguage(input.sessionId, input.locale);
 
-  console.log(`[safetyQuizStart] Calling backend to generate quiz for stock=${input.targetStock}, locale=${input.locale}`);
   const payload = {
     session_id: input.sessionId,
     target_stock: input.targetStock,
@@ -293,7 +367,7 @@ export async function safetyQuizStart(input: {
   const data = await callBackend("/quiz/generate", payload, QUIZ_START_TIMEOUT_MS);
   const normalized = normalizeQuizStart(data);
   if (!normalized) {
-    console.error(`[safetyQuizStart] normalizeQuizStart failed! Raw backend payload was:`, JSON.stringify(data));
+    console.error(`[Vercel->Render] normalizeQuizStart failed! Raw backend payload was:`, JSON.stringify(data));
     throw new BackendError("bad_response", "Failed to normalize quiz payload from backend");
   }
   return normalized;

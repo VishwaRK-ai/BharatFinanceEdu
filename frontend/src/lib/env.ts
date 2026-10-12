@@ -8,31 +8,42 @@ import { z } from "zod";
  * When USE_MOCK_BACKEND === "true", the LLM backend variables are optional.
  */
 
+// Normalize LLM_BACKEND_URL: remove whitespace, outer quotes, trailing slashes
+function sanitizeUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim().replace(/^["']|["']$/g, "").trim();
+  return trimmed ? trimmed.replace(/\/+$/, "") : undefined;
+}
+
 const envSchema = z
   .object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required (Neon pooled string)"),
     DIRECT_URL: z.string().min(1, "DIRECT_URL is required (Neon direct string)"),
-    LLM_BACKEND_URL: z.string().optional(),
+    LLM_BACKEND_URL: z.string().optional().transform(sanitizeUrl),
     LLM_BACKEND_API_KEY: z.string().optional(),
-    USE_MOCK_BACKEND: z.enum(["true", "false"]).default("true"),
+    USE_MOCK_BACKEND: z.enum(["true", "false"]).optional(),
     NEXT_PUBLIC_APP_URL: z.string().default("http://localhost:3000"),
   })
+  .transform((val) => {
+    // If USE_MOCK_BACKEND is explicitly set, respect it.
+    // If not set, but LLM_BACKEND_URL is provided, default to "false" (send requests to Render).
+    // Otherwise, default to "true" (local mock backend).
+    let effectiveUseMock = val.USE_MOCK_BACKEND;
+    if (!effectiveUseMock) {
+      effectiveUseMock = val.LLM_BACKEND_URL ? "false" : "true";
+    }
+    return {
+      ...val,
+      USE_MOCK_BACKEND: effectiveUseMock,
+    };
+  })
   .superRefine((val, ctx) => {
-    if (val.USE_MOCK_BACKEND === "true") return;
-    if (!val.LLM_BACKEND_URL) {
+    if (val.USE_MOCK_BACKEND === "false" && !val.LLM_BACKEND_URL) {
       ctx.addIssue({
         code: "custom",
         path: ["LLM_BACKEND_URL"],
         message:
-          "LLM_BACKEND_URL is required when USE_MOCK_BACKEND is not \"true\"",
-      });
-    }
-    if (!val.LLM_BACKEND_API_KEY) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["LLM_BACKEND_API_KEY"],
-        message:
-          "LLM_BACKEND_API_KEY is required when USE_MOCK_BACKEND is not \"true\"",
+          "LLM_BACKEND_URL is required when USE_MOCK_BACKEND is \"false\". Set LLM_BACKEND_URL to your Render backend URL in Vercel.",
       });
     }
   });

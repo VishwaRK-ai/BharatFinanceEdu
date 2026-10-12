@@ -83,51 +83,20 @@ export async function POST(request: NextRequest) {
   chatHistory.reverse();
 
   try {
-    let replyText = "";
-    try {
-      const apiUser = process.env.AZURE_API_USER || "admin";
-      const apiPass = process.env.AZURE_API_PASS || "BharatFinance2026!";
-      const rawApiUrl = process.env.AZURE_API_URL || "http://20.41.114.241:7860/api/predict";
-      const urlMatch = rawApiUrl.match(/https?:\/\/[^\s)\]]+/);
-      const apiUrl = urlMatch ? urlMatch[0] : rawApiUrl.trim().replace(/^[\[\(]+|[\]\)]+$/g, "");
-
-      const authHeader = `Basic ${Buffer.from(`${apiUser}:${apiPass}`).toString("base64")}`;
-      const promptText = chatHistory.length > 0
-        ? `${chatHistory.map((t) => `${t.role}: ${t.content}`).join("\n")}\nuser: ${message}`
-        : message;
-
-      const res = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: authHeader,
-        },
-        body: JSON.stringify({
-          data: [promptText, 256],
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`LLM endpoint returned status ${res.status}`);
-      }
-
-      const resJson = (await res.json()) as { data?: [string] };
-      replyText = resJson?.data?.[0] ?? "";
-    } catch {
-      // Fall back to backend client assistant if direct call fails
-      const fallback = await assistant({
-        message,
-        sessionId: visitorId,
-        chatHistory,
-        locale,
-      });
-      replyText = fallback.reply;
-    }
+    console.log(
+      `[/api/assistant] Dispatching chat query to backend: visitorId=${visitorId}, locale=${locale}, messageLen=${message.length}`
+    );
+    const backendResult = await assistant({
+      message,
+      sessionId: visitorId,
+      chatHistory,
+      locale,
+    });
 
     const result = {
-      reply: replyText,
-      rag_sources_used: false,
-      live_data_used: false,
+      reply: backendResult.reply,
+      rag_sources_used: backendResult.rag_sources_used ?? false,
+      live_data_used: backendResult.live_data_used ?? false,
     };
 
     // Persist both turns only after a successful reply, so a retry never
