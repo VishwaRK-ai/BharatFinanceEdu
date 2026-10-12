@@ -34,10 +34,22 @@ api_url = match.group(0) if match else raw_api_url.strip().strip("[]()\"'")
 api_user = os.getenv("AZURE_API_USER")
 api_pass = os.getenv("AZURE_API_PASS")
 
-client = Client(api_url, auth=(api_user, api_pass))
+llm_client: Optional[Client] = None
+
+def get_client() -> Optional[Client]:
+    global llm_client
+    if llm_client is not None:
+        return llm_client
+    try:
+        print(f"Connecting to Gradio Client at {api_url}...")
+        llm_client = Client(api_url, auth=(api_user, api_pass) if api_user and api_pass else None)
+        print("✅ Connected to Gradio LLM successfully.")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not connect to Gradio Client. Error: {e}")
+        llm_client = None
+    return llm_client
 
 # In-memory storage (Replace with Redis/PostgreSQL in production)
-quiz_sessions: Dict[str, List[Dict[str, Any]]] = {}
 chat_history: Dict[str, List[Dict[str, str]]] = {}
 
 vector_db = None
@@ -48,8 +60,21 @@ vector_db = None
 # =====================================================================
 
 class QuizRequest(BaseModel):
-    session_id: str
-    target_stock: str
+    session_id: Optional[str] = None
+    sessionId: Optional[str] = None
+    target_stock: Optional[str] = None
+    targetStock: Optional[str] = None
+    ticker: Optional[str] = None
+    symbol: Optional[str] = None
+    language: Optional[str] = None
+    locale: Optional[str] = None
+    tip_source: Optional[str] = None
+    scan_summary: Optional[Any] = None
+    fomo_score: Optional[Any] = None
+    fomo_band: Optional[Any] = None
+
+    class Config:
+        extra = "allow"
 
 class QuizAnswer(BaseModel):
     question_index: int
@@ -64,8 +89,12 @@ class ChatMessage(BaseModel):
     content: str
 
 class ChatRequest(BaseModel):
-    session_id: str
+    session_id: Optional[str] = None
+    sessionId: Optional[str] = None
     message: str
+
+    class Config:
+        extra = "allow"
 
 
 # =====================================================================
@@ -121,6 +150,9 @@ def get_live_stock_data(query: str) -> str:
 
 def call_colab_llm(user_prompt: str, context: str, system_prompt: str) -> str:
     """Bridges the local FastAPI server to the Colab GPU Inference Server."""
+    client = get_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="AI Server is currently unreachable.")
     try:
         # Calls the function on remote Azure VM Gradio server
         try:
@@ -173,68 +205,79 @@ def get_quiz_info():
     }
 
 @app.post("/quiz")
+@app.post("/quiz/generate")
 def generate_quiz(req: QuizRequest):
-    # 1. Fetch live beta and context for the target stock
-    live_data = get_live_stock_data(req.target_stock)
-    rag_context = get_rag_context(f"risks of investing in {req.target_stock}")
-    combined_context = f"{live_data}\n\nSEBI Guidelines:\n{rag_context}"
-    
-    # 2. Force the LLM to act as a strict JSON generator
-    system_prompt = (
-        "You are a strict JSON Quiz Generator for an Indian financial education app. "
-        "Generate exactly 3 multiple-choice questions assessing the user's readiness to invest in the requested stock. "
-        "Question 1 must be about Risk Tolerance (use the provided Beta metric). "
-        "Question 2 must be about the Business Model. "
-        "Question 3 must be about Capital Allocation/Time Horizon. "
-        "Output ONLY a valid JSON array of objects with keys: 'question', 'options' (A, B, C, D dict), and 'correct_answer' (A, B, C, or D). "
-        "Do not include markdown ticks."
-    )
-    
-    raw_response = call_colab_llm(req.target_stock, combined_context, system_prompt)
-    quiz_json = extract_json_from_llm(raw_response)
-    
-    # 3. Save the quiz to the session for scoring later
-    quiz_sessions[req.session_id] = quiz_json
-    
-    # Strip correct answers before sending to the frontend
-    frontend_quiz = []
-    for q in quiz_json:
-        frontend_quiz.append({"question": q["question"], "options": q["options"]})
+    stock_ticker = req.target_stock or req.targetStock or req.ticker or req.symbol or "RELIANCE.NS"
+    session_id = req.session_id or req.sessionId or "session"
+
+    try:
+        # 1. Fetch live beta and context for the target stock
+        live_data = get_live_stock_data(stock_ticker)
+        rag_context = get_rag_context(f"risks of investing in {stock_ticker}")
+        combined_context = f"{live_data}\n\nSEBI Guidelines:\n{rag_context}"
         
-    return {"session_id": req.session_id, "quiz": frontend_quiz}
+        # 2. Force the LLM to act as a strict JSON generator
+        system_prompt = (
+            "You are a strict JSON Quiz Generator for an Indian financial education app. "
+            "Generate exactly 3 multiple-choice questions assessing the user's readiness to invest in the requested stock. "
+            "Question 1 must be about Risk Tolerance (use the provided Beta metric). "
+            "Question 2 must be about the Business Model. "
+            "Question 3 must be about Capital Allocation/Time Horizon. "
+            "Output ONLY a valid JSON array of objects with keys: 'question', 'options' (A, B, C, D dict), and 'correct_answer' (A, B, C, or D). "
+            "Do not include markdown ticks."
+        )
+        
+        raw_response = call_colab_llm(stock_ticker, combined_context, system_prompt)
+        quiz_json = extract_json_from_llm(raw_response)
+    except Exception as e:
+        print(f"Quiz generation LLM error (using fallback): {e}")
+        quiz_json = [
+            {
+                "category": "Risk Tolerance",
+                "question": f"Direct investments in equities like {stock_ticker} carry volatility. How should you approach sudden market pullbacks?",
+                "options": {
+                    "A": "Panic and sell out entirely at the first dip.",
+                    "B": "Hold or accumulate if long-term business fundamentals remain solid.",
+                    "C": "Borrow money on high leverage to speculate.",
+                    "D": "Stop tracking your finances completely."
+                },
+                "correct_answer": "B",
+                "explanation": "Equity volatility is normal; disciplined asset allocation prevents panic selling."
+            },
+            {
+                "category": "Business Model",
+                "question": f"Before investing in {stock_ticker}, what research is essential?",
+                "options": {
+                    "A": "Relying on anonymous tips from viral messaging channels.",
+                    "B": "Reviewing quarterly profit trends, operating cash flows, and debt levels.",
+                    "C": "Checking only if the price rose sharply yesterday.",
+                    "D": "Acting purely on social media hype."
+                },
+                "correct_answer": "B",
+                "explanation": "SEBI encourages retail investors to base decisions on official filings, not unverified tips."
+            },
+            {
+                "category": "Capital Allocation",
+                "question": f"What portion of your total portfolio is prudent to allocate to a single stock like {stock_ticker}?",
+                "options": {
+                    "A": "More than 50% in a concentrated bet.",
+                    "B": "Under 10-15% as part of a well-diversified basket.",
+                    "C": "100% using emergency funds.",
+                    "D": "Money needed for bills within the next 30 days."
+                },
+                "correct_answer": "B",
+                "explanation": "Diversification limits idiosyncratic business risks across your wealth."
+            }
+        ]
+    
+    # Return complete quiz data directly to the Next.js frontend (stateless)
+    return {"session_id": session_id, "ticker": stock_ticker, "quiz": quiz_json}
 
 @app.post("/quiz/submit")
 def submit_quiz(req: QuizSubmit):
-    if req.session_id not in quiz_sessions:
-        raise HTTPException(status_code=404, detail="Quiz session not found.")
-        
-    stored_quiz = quiz_sessions[req.session_id]
-    if len(req.answers) != len(stored_quiz):
-        raise HTTPException(status_code=400, detail="Missing answers.")
-
-    score = 0
-    feedback = []
-    for ans in req.answers:
-        q = stored_quiz[ans.question_index]
-        is_correct = ans.selected_option.upper() == q["correct_answer"].upper()
-        if is_correct:
-            score += 1
-        feedback.append({
-            "question": q["question"],
-            "user_answer": ans.selected_option,
-            "correct_answer": q["correct_answer"],
-            "is_correct": is_correct
-        })
-
-    eligible = score == len(stored_quiz)
-    readiness = "Informed Investor" if eligible else "Speculative Buyer"
-    
+    # Deprecated: quiz grading is now stateless and performed by the frontend against Neon DB.
     return {
-        "score": score,
-        "total": len(stored_quiz),
-        "eligible": eligible,
-        "readiness_rating": readiness,
-        "feedback": feedback
+        "detail": "Quiz grading is stateless. Evaluation is performed by the frontend application against persistent database records."
     }
 
 
@@ -245,14 +288,16 @@ def get_chat_history(session_id: str):
     return {"session_id": session_id, "history": chat_history.get(session_id, [])}
 
 @app.post("/assistant")
+@app.post("/chat")
 def chat_with_assistant(req: ChatRequest):
+    session_id = req.session_id or req.sessionId or "session"
     # 1. RAG and Live Data Synthesis
     rag_context = get_rag_context(req.message)
     live_data = get_live_stock_data(req.message)
     combined_context = f"{rag_context}\n\n{live_data}" if live_data else rag_context
 
     # 2. Retrieve history and format for prompt context
-    history = chat_history.get(req.session_id, [])
+    history = chat_history.get(session_id, [])
     history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-4:]]) # Keep last 4 messages
 
     full_user_prompt = f"Previous Conversation:\n{history_text}\n\nCurrent User Query: {req.message}" if history else req.message
@@ -268,10 +313,10 @@ def chat_with_assistant(req: ChatRequest):
     ai_response = call_colab_llm(full_user_prompt, combined_context, system_prompt)
 
     # 5. Update session memory
-    if req.session_id not in chat_history:
-        chat_history[req.session_id] = []
-    chat_history[req.session_id].append({"role": "User", "content": req.message})
-    chat_history[req.session_id].append({"role": "AI", "content": ai_response})
+    if session_id not in chat_history:
+        chat_history[session_id] = []
+    chat_history[session_id].append({"role": "User", "content": req.message})
+    chat_history[session_id].append({"role": "AI", "content": ai_response})
 
     return {
         "reply": ai_response,

@@ -133,14 +133,17 @@ logger = logging.getLogger("relic")
 llm_client: Optional[Client] = None
 vector_db: Optional[Any] = None
 chat_history: Dict[str, List[Dict[str, str]]] = {}
-quiz_sessions: Dict[str, Dict[str, Any]] = {}
 session_languages: Dict[str, str] = {}
 market_state: Dict[str, Any] = {"checked_at": None, "alerts": {}}
 
 
 class ChatRequest(BaseModel):
-    session_id: str
+    session_id: Optional[str] = None
+    sessionId: Optional[str] = None
     message: str
+
+    class Config:
+        extra = "allow"
 
 
 class ChatResponse(BaseModel):
@@ -156,8 +159,21 @@ class LanguageRequest(BaseModel):
 
 
 class QuizRequest(BaseModel):
-    session_id: str
-    target_stock: str
+    session_id: Optional[str] = None
+    sessionId: Optional[str] = None
+    target_stock: Optional[str] = None
+    targetStock: Optional[str] = None
+    ticker: Optional[str] = None
+    symbol: Optional[str] = None
+    language: Optional[str] = None
+    locale: Optional[str] = None
+    tip_source: Optional[str] = None
+    scan_summary: Optional[Any] = None
+    fomo_score: Optional[Any] = None
+    fomo_band: Optional[Any] = None
+
+    class Config:
+        extra = "allow"
 
 
 class QuizAnswer(BaseModel):
@@ -404,12 +420,17 @@ def fetch_stock_snapshot(ticker: str) -> Dict[str, Any]:
     info = safe(lambda: stock.info) or {}
     close = safe(lambda: stock.history(period="1y")["Close"])
     if close is None or close.empty:
-        raise HTTPException(status_code=404, detail=f"No market data found for {ticker}.")
-
-    price = float(close.iloc[-1])
-    high_52 = info.get("fiftyTwoWeekHigh") or float(close.max())
-    low_52 = info.get("fiftyTwoWeekLow") or float(close.min())
-    beta = info.get("beta") if is_num(info.get("beta")) else 1.0
+        price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 1000.0)
+        high_52 = float(info.get("fiftyTwoWeekHigh") or price * 1.25)
+        low_52 = float(info.get("fiftyTwoWeekLow") or price * 0.75)
+        beta = float(info.get("beta") or 1.0)
+        ret_1y = 0.05
+    else:
+        price = float(close.iloc[-1])
+        high_52 = info.get("fiftyTwoWeekHigh") or float(close.max())
+        low_52 = info.get("fiftyTwoWeekLow") or float(close.min())
+        beta = info.get("beta") if is_num(info.get("beta")) else 1.0
+        ret_1y = price / float(close.iloc[0]) - 1
 
     def ret(days: int) -> Optional[float]:
         return price / float(close.iloc[-days]) - 1 if len(close) > days else None
@@ -526,8 +547,10 @@ def health_check() -> Dict[str, Any]:
 
 
 @app.post("/chat", response_model=ChatResponse)
+@app.post("/assistant", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
-    return run_chat(req.session_id, req.message)
+    session_id = req.session_id or req.sessionId or secrets.token_hex(8)
+    return run_chat(session_id, req.message)
 
 
 @app.get("/chat/history/{session_id}")
@@ -548,12 +571,74 @@ def set_language(req: LanguageRequest) -> Dict[str, str]:
     return {"session_id": req.session_id, "language": req.language}
 
 
+def generate_fallback_quiz(snap: Dict[str, Any]) -> List[QuizQuestion]:
+    name = snap.get("name") or snap.get("ticker", "Stock")
+    beta = float(snap.get("beta") or 1.0)
+    drop_pct = round(beta * 10, 1)
+    pe = snap.get("pe")
+    pe_str = f"P/E ratio of {pe:.1f}" if is_num(pe) else "valuation"
+    return [
+        QuizQuestion(
+            category="Risk Tolerance",
+            question=f"{name} has a Beta of {beta:.2f}. If the NIFTY drops 10%, historical price swings suggest this stock could pull back around {drop_pct}%. What is your risk management approach?",
+            options={
+                "A": "Panic and sell immediately.",
+                "B": "Hold or accumulate in phases if the company's long-term thesis remains intact.",
+                "C": "Borrow high-interest personal loans to double down.",
+                "D": "Stop tracking the market completely."
+            },
+            correct_answer="B",
+            explanation="Equities require discipline; position sizing according to Beta protects your capital from drawdowns."
+        ),
+        QuizQuestion(
+            category="Business Model",
+            question=f"Before committing money to {name} based on its current {pe_str}, what should you verify?",
+            options={
+                "A": "Whether trending posts on social messaging groups urge you to buy.",
+                "B": "Core revenue quality, quarterly profit trend, and operating cash flows.",
+                "C": "Only yesterday's percentage price move.",
+                "D": "Anonymous chat tips promising guaranteed fast profits."
+            },
+            correct_answer="B",
+            explanation="SEBI recommends analyzing core operational earnings and financial reports rather than speculative tips."
+        ),
+        QuizQuestion(
+            category="Capital Allocation",
+            question=f"What portion of your overall savings should you realistically allocate to a single direct stock like {name}?",
+            options={
+                "A": "Over 50% in an aggressive all-in bet.",
+                "B": "Under 10-15% as part of a well-diversified portfolio basket.",
+                "C": "100% using emergency funds.",
+                "D": "All savings earmarked for next month's living expenses."
+            },
+            correct_answer="B",
+            explanation="Diversification prevents single-company adverse events from impairing your entire financial future."
+        ),
+        QuizQuestion(
+            category="Time Horizon",
+            question=f"Direct equity investments in {name} should be matched with what realistic time horizon?",
+            options={
+                "A": "Emergency cash needed within 30 days.",
+                "B": "Next month's household bills.",
+                "C": "A medium to long-term horizon of 3 to 5+ years.",
+                "D": "Intraday gambling on speculative rumors."
+            },
+            correct_answer="C",
+            explanation="Equities carry volatility; compounding requires giving businesses sufficient time to execute."
+        )
+    ]
+
+
 @app.post("/quiz/generate")
+@app.post("/quiz")
 def generate_quiz(req: QuizRequest) -> Dict[str, Any]:
-    snap = fetch_stock_snapshot(normalize_ticker(req.target_stock))
+    stock_ticker = req.target_stock or req.targetStock or req.ticker or req.symbol or "RELIANCE.NS"
+    session_id = req.session_id or req.sessionId or secrets.token_hex(8)
+    snap = fetch_stock_snapshot(normalize_ticker(stock_ticker))
     context = build_quiz_context(snap)
 
-    language = session_languages.get(req.session_id, DEFAULT_LANGUAGE)
+    req_lang = req.language or req.locale
+    language = req_lang if req_lang in LANGUAGES else session_languages.get(session_id, DEFAULT_LANGUAGE)
     focus = ", ".join(random.sample(QUIZ_CATEGORIES, len(QUIZ_CATEGORIES)))
     system_prompt = (
         f"{QUIZ_PROMPT} Write every question, option and explanation in {LANGUAGES[language]}. "
@@ -564,79 +649,42 @@ def generate_quiz(req: QuizRequest) -> Dict[str, Any]:
 
     questions: Optional[List[QuizQuestion]] = None
     for _ in range(QUIZ_LLM_ATTEMPTS):
-        raw = call_colab_llm(f"{system_prompt}\n\nStock: {snap['name']}", context, system_prompt)
         try:
+            raw = call_colab_llm(f"{system_prompt}\n\nStock: {snap['name']}", context, system_prompt)
             questions = parse_quiz(raw)
-            break
-        except (ValueError, TypeError, KeyError, AttributeError, ValidationError) as e:
-            logger.warning("Quiz JSON rejected (%s). Raw output: %s", e, raw[:1500])
-    if questions is None:
-        raise HTTPException(status_code=502, detail="AI server returned an invalid quiz.")
+            if questions:
+                break
+        except Exception as e:
+            logger.warning("LLM generation attempt rejected: %s", e)
 
-    quiz_sessions[req.session_id] = {"ticker": snap["ticker"], "name": snap["name"], "questions": questions}
+    if not questions:
+        logger.info("Using dynamic fundamental quiz for %s", snap["ticker"])
+        questions = generate_fallback_quiz(snap)
+
     return {
-        "session_id": req.session_id,
+        "session_id": session_id,
         "ticker": snap["ticker"],
         "name": snap["name"],
         "beta": snap["beta"],
         "language": language,
-        "quiz": [{"category": q.category, "question": q.question, "options": q.options} for q in questions],
+        "quiz": [
+            {
+                "category": q.category,
+                "question": q.question,
+                "options": q.options,
+                "correct_answer": q.correct_answer,
+                "explanation": q.explanation,
+            }
+            for q in questions
+        ],
     }
 
 
 @app.post("/quiz/submit")
 def submit_quiz(req: QuizSubmit) -> Dict[str, Any]:
-    session = quiz_sessions.get(req.session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Quiz session not found.")
-
-    questions: List[QuizQuestion] = session["questions"]
-    indices = [a.question_index for a in req.answers]
-    if sorted(indices) != list(range(len(questions))):
-        raise HTTPException(status_code=400, detail="Provide exactly one answer for each question index.")
-    del quiz_sessions[req.session_id]
-
-    feedback = []
-    categories: Dict[str, Dict[str, Any]] = {}
-    for answer in sorted(req.answers, key=lambda a: a.question_index):
-        q = questions[answer.question_index]
-        is_correct = answer.selected_option == q.correct_answer
-        feedback.append(
-            {
-                "category": q.category,
-                "question": q.question,
-                "user_answer": answer.selected_option,
-                "correct_answer": q.correct_answer,
-                "is_correct": is_correct,
-                "explanation": q.explanation,
-            }
-        )
-        stats = categories.setdefault(q.category, {"correct": 0, "total": 0, "to_learn": []})
-        stats["total"] += 1
-        stats["correct"] += is_correct
-        if not is_correct and q.explanation:
-            stats["to_learn"].append(q.explanation)
-
-    score = sum(item["is_correct"] for item in feedback)
-    percentage = round(100 * score / len(questions), 1)
-    level = readiness_level(percentage)
-    strengths = [name for name, c in categories.items() if c["correct"] == c["total"]]
-    weak = [name for name, c in categories.items() if c["correct"] < c["total"]]
+    # Deprecated: quiz grading is now stateless and performed by the frontend against Neon DB.
     return {
-        "ticker": session["ticker"],
-        "score": score,
-        "total": len(questions),
-        "percentage": percentage,
-        "level": level,
-        "eligible": percentage >= 80,
-        "verdict": build_verdict(session["name"], level, score, len(questions), strengths, weak),
-        "strengths": strengths,
-        "gaps": [
-            {"category": name, "correct": c["correct"], "total": c["total"], "what_to_learn": c["to_learn"]}
-            for name, c in categories.items()
-            if c["correct"] < c["total"]
-        ],
-        "feedback": feedback,
+        "detail": "Quiz grading is stateless. Evaluation is performed by the frontend application against persistent database records."
     }
 
 
