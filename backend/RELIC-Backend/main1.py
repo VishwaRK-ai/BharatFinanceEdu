@@ -243,15 +243,16 @@ def call_colab_llm(prompt: str, context: str, system_prompt: str) -> str:
     global llm_client
     try:
         if llm_client is None:
-            llm_client = Client(COLAB_API_URL, auth=COLAB_AUTH)
+            llm_client = Client(COLAB_API_URL, auth=COLAB_AUTH, httpx_kwargs={"timeout": 120.0})
         try:
             return str(llm_client.predict(prompt=f"{system_prompt}\n\nContext:\n{context}\n\nUser:\n{prompt}", max_tokens=256, api_name="/predict"))
         except Exception:
             return str(llm_client.predict(prompt, context, system_prompt, fn_index=0))
-    except Exception:
+    except Exception as e:
         llm_client = None
-        logger.exception("Colab inference call failed")
-        raise HTTPException(status_code=503, detail="AI server is currently unreachable.")
+        print(f"Error: [Azure Gradio Inference Failed] {e}")
+        logger.error(f"Inference call failed: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail=f"AI server is currently unreachable: {e}")
 
 
 def normalize_question(item: Dict[str, Any]) -> QuizQuestion:

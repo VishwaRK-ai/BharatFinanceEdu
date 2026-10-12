@@ -278,11 +278,12 @@ async def generate_quiz(request: Request):
 
     result = None
     try:
-        client = Client(azure_url, auth=(user, pwd))
+        client = Client(azure_url, auth=(user, pwd), httpx_kwargs={"timeout": 120.0})
         result = client.predict(json.dumps(payload), 1024)
         logger.info(f"Received Azure prediction response (length {len(str(result))})")
     except Exception as e:
-        logger.warning(f"Azure client prediction failed or timed out: {e}")
+        print(f"Error: [Quiz Azure Prediction Failed] {e}")
+        logger.error(f"[Render->Azure Quiz Error] Connection/prediction to {azure_url} failed: {e}", exc_info=True)
 
     # Validate and normalize result into schema expected by normalizeQuizStart
     validated = extract_and_validate_quiz(result, target_stock, session_id)
@@ -303,10 +304,11 @@ async def chat(request: Request):
     pwd = os.getenv("AZURE_API_PASS", "BharatFinance2026!")
 
     try:
-        client = Client(azure_url, auth=(user, pwd))
+        client = Client(azure_url, auth=(user, pwd), httpx_kwargs={"timeout": 120.0})
         result = client.predict(json.dumps(payload), 1024)
     except Exception as e:
-        logger.warning(f"Azure client prediction failed: {e}")
+        print(f"Error: [Chat Azure Prediction Failed] {e}")
+        logger.error(f"[Render->Azure Chat Error] Connection/prediction to {azure_url} failed: {e}", exc_info=True)
         return {
             "reply": "I am currently connecting to market intelligence servers. Please ask your question again in a moment.",
             "rag_sources_used": False,

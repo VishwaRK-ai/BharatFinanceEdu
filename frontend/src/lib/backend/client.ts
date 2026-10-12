@@ -213,6 +213,14 @@ export async function assistant(input: AssistantInput): Promise<AssistantRespons
 
     const parsed = assistantResponseSchema.safeParse(data);
     if (parsed.success) {
+      if (
+        parsed.data.reply.includes("connecting to market intelligence servers")
+      ) {
+        console.error(
+          "[Vercel->Render] Upstream Render backend returned fallback message due to Azure connection failure:",
+          parsed.data.reply
+        );
+      }
       return parsed.data;
     }
 
