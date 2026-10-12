@@ -274,8 +274,10 @@ def shuffle_options(question: QuizQuestion) -> QuizQuestion:
 
 
 def parse_quiz(text: str) -> List[QuizQuestion]:
-    match = re.search(r"\[\s*\{.*\}\s*\]", text, re.DOTALL)
-    questions = [shuffle_options(normalize_question(item)) for item in json.loads(match.group(0) if match else text)]
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    match = re.search(r"\[\s*\{.*\}\s*\]", cleaned, re.DOTALL)
+    questions = [shuffle_options(normalize_question(item)) for item in json.loads(match.group(0) if match else cleaned)]
     if not QUIZ_MIN_QUESTIONS <= len(questions) <= QUIZ_MAX_QUESTIONS:
         raise ValueError(f"expected {QUIZ_MIN_QUESTIONS}-{QUIZ_MAX_QUESTIONS} questions, got {len(questions)}")
     return questions
@@ -661,22 +663,28 @@ def generate_quiz(req: QuizRequest) -> Dict[str, Any]:
         logger.info("Using dynamic fundamental quiz for %s", snap["ticker"])
         questions = generate_fallback_quiz(snap)
 
+    quiz_list = [
+        {
+            "category": q.category,
+            "question": q.question,
+            "options": q.options,
+            "correct_answer": q.correct_answer,
+            "explanation": q.explanation,
+        }
+        for q in questions
+    ]
+
     return {
         "session_id": session_id,
+        "quiz_id": session_id,
         "ticker": snap["ticker"],
+        "stock_name": snap["name"],
         "name": snap["name"],
+        "topic": "Stock Safety & Valuation",
         "beta": snap["beta"],
         "language": language,
-        "quiz": [
-            {
-                "category": q.category,
-                "question": q.question,
-                "options": q.options,
-                "correct_answer": q.correct_answer,
-                "explanation": q.explanation,
-            }
-            for q in questions
-        ],
+        "quiz": quiz_list,
+        "questions": quiz_list,
     }
 
 
