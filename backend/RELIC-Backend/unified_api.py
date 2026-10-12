@@ -2,6 +2,7 @@ import os
 import re
 import json
 import logging
+import traceback
 from typing import Any, Dict, Optional
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -283,6 +284,7 @@ async def generate_quiz(request: Request):
         logger.info(f"Received Azure prediction response (length {len(str(result))})")
     except Exception as e:
         print(f"Error: [Quiz Azure Prediction Failed] {e}")
+        traceback.print_exc()
         logger.error(f"[Render->Azure Quiz Error] Connection/prediction to {azure_url} failed: {e}", exc_info=True)
 
     # Validate and normalize result into schema expected by normalizeQuizStart
@@ -308,6 +310,7 @@ async def chat(request: Request):
         result = client.predict(json.dumps(payload), 1024)
     except Exception as e:
         print(f"Error: [Chat Azure Prediction Failed] {e}")
+        traceback.print_exc()
         logger.error(f"[Render->Azure Chat Error] Connection/prediction to {azure_url} failed: {e}", exc_info=True)
         return {
             "reply": "I am currently connecting to market intelligence servers. Please ask your question again in a moment.",

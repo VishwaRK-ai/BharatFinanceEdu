@@ -1,7 +1,8 @@
 import os
 import re
 import json
-from typing import Any, Optional
+import traceback
+from typing import Any, Dict, List, Optional
 
 import torch
 import gradio as gr
@@ -10,75 +11,8 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # =====================================================================
-# 1. CHROMADB VECTORSTORE INITIALIZATION
+# GLOBAL CONFIGURATION & STOCK LOOKUP (Defined at top to avoid NameError)
 # =====================================================================
-CHROMA_PATH = "/home/azureuser/backend/RELIC-Backend/chroma_db"
-print(f"Initializing embedding model 'all-MiniLM-L6-v2'...")
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-print(f"Loading Chroma vectorstore from {CHROMA_PATH}...")
-try:
-    vectorstore = Chroma(
-        persist_directory=CHROMA_PATH,
-        embedding_function=embeddings
-    )
-    print("✅ Chroma vectorstore initialized successfully.")
-except Exception as e:
-    print(f"⚠️ Warning: Could not initialize Chroma vectorstore from {CHROMA_PATH}: {e}")
-    # Local fallback for development / non-Azure environments
-    if os.path.exists("./chroma_db"):
-        vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
-    elif os.path.exists("backend/RELIC-Backend/chroma_db"):
-        vectorstore = Chroma(persist_directory="backend/RELIC-Backend/chroma_db", embedding_function=embeddings)
-    else:
-        vectorstore = None
-
-# =====================================================================
-# 2. MODEL LOADING (UNSLOTH / TRANSFORMERS)
-# =====================================================================
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Serving on device: {device}")
-
-model = None
-tokenizer = None
-
-try:
-    from unsloth import FastLanguageModel
-    print("Loading model using Unsloth FastLanguageModel...")
-    model_path = "/home/azureuser/backend/RELIC-Backend/bharat_finance_model"
-    if not os.path.exists(model_path):
-        model_path = "bharat_finance_model" if os.path.exists("bharat_finance_model") else "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
-    
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_path,
-        max_seq_length=2048,
-        dtype=None,
-        load_in_4bit=True,
-    )
-    FastLanguageModel.for_inference(model)
-    print("✅ Fine-tuned Unsloth model loaded successfully.")
-except Exception as e_unsloth:
-    print(f"Unsloth load bypassed/failed: {e_unsloth}. Trying transformers AutoModelForCausalLM...")
-    try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        model_path = "/home/azureuser/backend/RELIC-Backend/bharat_finance_model"
-        if not os.path.exists(model_path):
-            model_path = "bharat_finance_model" if os.path.exists("bharat_finance_model") else "Qwen/Qwen2.5-7B-Instruct"
-
-        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-            device_map="auto" if torch.cuda.is_available() else None,
-            trust_remote_code=True,
-        )
-        print("✅ Transformers model loaded successfully.")
-    except Exception as e_trans:
-        print(f"⚠️ Transformers model load warning: {e_trans}")
-        model = None
-        tokenizer = None
-
-
 STOCK_NAMES = {
     "RELIANCE.NS": "Reliance Industries",
     "TCS.NS": "Tata Consultancy Services",
@@ -98,12 +32,111 @@ STOCK_NAMES = {
 }
 
 
-def get_stock_display_name(ticker: str) -> str:
+def get_stock_display_name(ticker: Optional[str]) -> str:
+    """Safe lookup for human-readable stock name, guaranteed never to throw."""
+    if not ticker or not isinstance(ticker, str):
+        return "Reliance Industries"
     clean = ticker.upper().strip()
     if clean in STOCK_NAMES:
         return STOCK_NAMES[clean]
     base = clean.replace(".NS", "").replace(".BO", "")
-    return base.title()
+    return base.title() if base else "Reliance Industries"
+
+
+# =====================================================================
+# 1. CHROMADB VECTORSTORE INITIALIZATION
+# =====================================================================
+CHROMA_PATH = "/home/azureuser/backend/RELIC-Backend/chroma_db"
+print("Initializing embedding model 'all-MiniLM-L6-v2'...")
+embeddings = None
+try:
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+except Exception as e_emb:
+    print(f"Warning: HuggingFaceEmbeddings could not be loaded: {e_emb}")
+
+print(f"Loading Chroma vectorstore from {CHROMA_PATH}...")
+vectorstore = None
+if embeddings is not None:
+    try:
+        vectorstore = Chroma(
+            persist_directory=CHROMA_PATH,
+            embedding_function=embeddings
+        )
+        print("✅ Chroma vectorstore initialized successfully.")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not initialize Chroma vectorstore from {CHROMA_PATH}: {e}")
+        # Local fallback for development / non-Azure environments
+        if os.path.exists("./chroma_db"):
+            vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+        elif os.path.exists("backend/RELIC-Backend/chroma_db"):
+            vectorstore = Chroma(persist_directory="backend/RELIC-Backend/chroma_db", embedding_function=embeddings)
+        else:
+            vectorstore = None
+
+# =====================================================================
+# 2. MODEL LOADING (LLAMACPP / UNSLOTH / TRANSFORMERS)
+# =====================================================================
+# Global references for LLM instances
+llm = None
+model = None
+tokenizer = None
+
+# 2a. Attempt loading LlamaCpp instance if available / configured
+try:
+    from langchain_community.llms import LlamaCpp
+    llm_path = os.getenv("LLM_MODEL_PATH", "/home/azureuser/backend/RELIC-Backend/bharat_finance_model.gguf")
+    if os.path.exists(llm_path):
+        print(f"Loading LlamaCpp model from {llm_path}...")
+        llm = LlamaCpp(
+            model_path=llm_path,
+            n_ctx=2048,
+            temperature=0.3,
+            max_tokens=512,
+            verbose=False,
+        )
+        print("✅ LlamaCpp model loaded successfully.")
+except Exception as e_llamacpp:
+    print(f"LlamaCpp load bypassed/not found: {e_llamacpp}")
+
+# 2b. Fallback to Unsloth / Transformers if LlamaCpp is not loaded
+if llm is None:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Serving on device: {device}")
+    try:
+        from unsloth import FastLanguageModel
+        print("Loading model using Unsloth FastLanguageModel...")
+        model_path = "/home/azureuser/backend/RELIC-Backend/bharat_finance_model"
+        if not os.path.exists(model_path):
+            model_path = "bharat_finance_model" if os.path.exists("bharat_finance_model") else "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
+        
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_path,
+            max_seq_length=2048,
+            dtype=None,
+        )
+        FastLanguageModel.for_inference(model)
+        print("✅ Fine-tuned Unsloth model loaded successfully.")
+    except Exception as e_unsloth:
+        print(f"Unsloth load bypassed/failed: {e_unsloth}. Trying transformers AutoModelForCausalLM...")
+        try:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            model_path = "/home/azureuser/backend/RELIC-Backend/bharat_finance_model"
+            if not os.path.exists(model_path):
+                model_path = "bharat_finance_model" if os.path.exists("bharat_finance_model") else "Qwen/Qwen2.5-7B-Instruct"
+
+            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                device_map="auto" if torch.cuda.is_available() else None,
+                trust_remote_code=True,
+            )
+            print("✅ Transformers model loaded successfully.")
+        except Exception as e_trans:
+            print(f"⚠️ Transformers model load warning: {e_trans}")
+            model = None
+            tokenizer = None
+
 
 
 def generate_fallback_quiz(target_stock: str, session_id: str = "session_1") -> Dict[str, Any]:
@@ -310,41 +343,78 @@ def generate_text(
     system_instruction: Optional[str] = None,
     temperature: float = 0.3
 ) -> str:
-    """Generate LLM completion from prompt."""
-    if model is None or tokenizer is None:
-        return "Model is not initialized."
-    try:
-        if system_instruction is None:
-            system_instruction = (
-                "You are BharatFinanceEdu, an expert Indian financial educator. "
-                "Explain concepts simply, using clear analogies and dispelling misconceptions. "
-                "Base your answers on the provided context. If the user acts impulsively, warn them based on SEBI rules."
-            )
-        messages = [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": prompt_text},
-        ]
-        inputs = tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_tensors="pt",
-        )
-        if torch.cuda.is_available():
-            inputs = inputs.to("cuda")
+    """
+    Generate LLM completion from prompt.
+    Supports LlamaCpp instance (`llm.invoke(prompt)` or `llm(prompt)`)
+    as well as Unsloth / HuggingFace Transformers (`model.generate`).
+    """
+    global llm, model, tokenizer
 
-        with torch.inference_mode():
-            outputs = model.generate(
-                input_ids=inputs,
-                max_new_tokens=int(max_tokens),
-                temperature=temperature,
-                use_cache=True,
+    if system_instruction is None:
+        system_instruction = (
+            "You are BharatFinanceEdu, an expert Indian financial educator. "
+            "Explain concepts simply, using clear analogies and dispelling misconceptions. "
+            "Base your answers on the provided context. If the user acts impulsively, warn them based on SEBI rules."
+        )
+
+    # 1. Check if LlamaCpp instance (`llm`) is available
+    if llm is not None:
+        try:
+            full_prompt = f"{system_instruction}\n\n{prompt_text}"
+            print(f"Invoking LlamaCpp instance with prompt (length {len(full_prompt)})...")
+
+            # Try modern LangChain invoke() first
+            if hasattr(llm, "invoke"):
+                res = llm.invoke(full_prompt)
+                if hasattr(res, "content"):
+                    return str(res.content).strip()
+                return str(res).strip()
+            # Fall back to direct callable: llm(prompt)
+            elif callable(llm):
+                res = llm(full_prompt)
+                if isinstance(res, dict) and "choices" in res:
+                    return str(res["choices"][0]["text"]).strip()
+                return str(res).strip()
+            else:
+                raise AttributeError("llm instance has neither invoke method nor is callable")
+        except Exception as e:
+            print(f"Error during LlamaCpp generation: {e}")
+            traceback.print_exc()
+            raise e
+
+    # 2. Check if HuggingFace / Unsloth model is available
+    if model is not None and tokenizer is not None:
+        try:
+            messages = [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt_text},
+            ]
+            inputs = tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="pt",
             )
-        response = tokenizer.batch_decode(outputs[:, inputs.shape[1]:], skip_special_tokens=True)[0]
-        return response.strip()
-    except Exception as e:
-        print(f"Generation error: {e}")
-        return f"Error during generation: {e}"
+            if torch.cuda.is_available():
+                inputs = inputs.to("cuda")
+
+            with torch.inference_mode():
+                outputs = model.generate(
+                    input_ids=inputs,
+                    max_new_tokens=int(max_tokens),
+                    temperature=temperature,
+                    use_cache=True,
+                )
+            response = tokenizer.batch_decode(outputs[:, inputs.shape[1]:], skip_special_tokens=True)[0]
+            return response.strip()
+        except Exception as e:
+            print(f"Error during Transformers/Unsloth generation: {e}")
+            traceback.print_exc()
+            raise e
+
+    # 3. Neither model is initialized
+    print("Error: Neither LlamaCpp (`llm`) nor Transformers (`model`) is initialized.")
+    raise RuntimeError("Model is not initialized.")
 
 
 # =====================================================================
@@ -357,151 +427,191 @@ def predict(prompt: Any, max_tokens: float = 256) -> str:
     Performs similarity search against ChromaDB using target_stock (k=3),
     injects context into the prompt, and returns schema-conforming responses.
     """
-    target_stock = "RELIANCE.NS"
-    user_text = ""
-    session_id = "default_session"
-    is_quiz = False
+    try:
+        target_stock = "RELIANCE.NS"
+        user_text = ""
+        session_id = "default_session"
+        is_quiz = False
 
-    # 1. Parse prompt and detect request type
-    parsed = None
-    if isinstance(prompt, dict):
-        parsed = prompt
-    elif isinstance(prompt, str):
-        try:
-            val = json.loads(prompt)
-            if isinstance(val, dict):
-                parsed = val
-        except Exception:
-            parsed = None
+        # 1. Parse prompt and detect request type
+        parsed = None
+        if isinstance(prompt, dict):
+            parsed = prompt
+        elif isinstance(prompt, str):
+            try:
+                val = json.loads(prompt)
+                if isinstance(val, dict):
+                    parsed = val
+            except Exception:
+                parsed = None
 
-    if parsed is not None:
-        target_stock = (
-            parsed.get("target_stock")
-            or parsed.get("targetStock")
-            or parsed.get("ticker")
-            or parsed.get("stock_name")
-            or parsed.get("symbol")
-            or "RELIANCE.NS"
-        )
-        session_id = str(parsed.get("session_id") or parsed.get("sessionId") or "default_session")
-        action = str(parsed.get("action", "")).lower()
-        if action in ("quiz", "quiz/generate", "generate_quiz"):
-            is_quiz = True
-        elif ("target_stock" in parsed or "targetStock" in parsed) and "message" not in parsed:
-            is_quiz = True
-        elif "target_stock" in parsed and "quiz" in str(parsed.get("message", "")).lower():
-            is_quiz = True
-        user_text = parsed.get("message") or parsed.get("prompt") or json.dumps(parsed)
-    else:
-        user_text = str(prompt)
-        if "quiz" in user_text.lower() and ("generate" in user_text.lower() or "target_stock" in user_text.lower()):
-            is_quiz = True
-
-        # Heuristic extraction of stock ticker if not in JSON
-        known_stocks = [
-            "RELIANCE", "TATAMOTORS", "TATA MOTORS", "ZOMATO",
-            "SUZLON", "HDFCBANK", "HDFC", "INFY", "INFOSYS", "ITC", "SBIN", "SBI"
-        ]
-        for s in known_stocks:
-            if re.search(rf"\b{s}\b", user_text, re.IGNORECASE):
-                target_stock = f"{s.replace(' ', '')}.NS" if not s.endswith(".NS") else s
-                break
-
-    stock_name = get_stock_display_name(target_stock)
-
-    # 2. Similarity search using target_stock (k=3)
-    context_str = ""
-    if vectorstore is not None:
-        try:
-            search_query = (
-                f"{stock_name} ({target_stock}) investor suitability, volatility risk and SEBI guidelines"
-                if is_quiz else
-                f"{target_stock} investment risk profile and SEBI guidelines"
+        if parsed is not None:
+            # Safely extract target stock with guaranteed fallback
+            raw_stock = (
+                parsed.get("target_stock")
+                or parsed.get("targetStock")
+                or parsed.get("ticker")
+                or parsed.get("stock_name")
+                or parsed.get("symbol")
             )
-            docs = vectorstore.similarity_search(search_query, k=3)
-            chunks = [doc.page_content.strip() for doc in docs if getattr(doc, "page_content", None)]
-            context_str = "\n\n".join(chunks)
+            if raw_stock and isinstance(raw_stock, str) and raw_stock.strip():
+                target_stock = raw_stock.strip()
+            else:
+                target_stock = "RELIANCE.NS"
+
+            session_id = str(parsed.get("session_id") or parsed.get("sessionId") or "default_session")
+
+            # Extract message / user prompt cleanly
+            user_text = (
+                parsed.get("message")
+                or parsed.get("prompt")
+                or parsed.get("text")
+                or parsed.get("query")
+                or ""
+            )
+            if not isinstance(user_text, str):
+                user_text = str(user_text) if user_text is not None else ""
+
+            # Check if request is quiz action
+            action = str(parsed.get("action", "")).lower()
+            if action in ("quiz", "quiz/generate", "generate_quiz"):
+                is_quiz = True
+            elif ("target_stock" in parsed or "targetStock" in parsed) and not user_text:
+                is_quiz = True
+            elif "target_stock" in parsed and "quiz" in user_text.lower():
+                is_quiz = True
+
+            # If user_text is empty, serialize dictionary
+            if not user_text:
+                user_text = json.dumps(parsed)
+        else:
+            user_text = str(prompt) if prompt is not None else ""
+            if "quiz" in user_text.lower() and ("generate" in user_text.lower() or "target_stock" in user_text.lower()):
+                is_quiz = True
+
+            # Heuristic extraction of stock ticker if not in JSON
+            known_stocks = [
+                "RELIANCE", "TATAMOTORS", "TATA MOTORS", "ZOMATO",
+                "SUZLON", "HDFCBANK", "HDFC", "INFY", "INFOSYS", "ITC", "SBIN", "SBI", "TCS"
+            ]
+            for s in known_stocks:
+                if re.search(rf"\b{s}\b", user_text, re.IGNORECASE):
+                    target_stock = f"{s.replace(' ', '')}.NS" if not s.endswith(".NS") else s
+                    break
+
+        if not target_stock or not isinstance(target_stock, str):
+            target_stock = "RELIANCE.NS"
+
+        stock_name = get_stock_display_name(target_stock)
+
+        # 2. Similarity search using ChromaDB (k=3)
+        context_str = ""
+        if vectorstore is not None:
+            try:
+                if is_quiz:
+                    search_query = f"{stock_name} ({target_stock}) investor suitability, volatility risk and SEBI guidelines"
+                else:
+                    search_query = f"{user_text} {target_stock} investment risk profile and SEBI guidelines".strip()
+
+                docs = vectorstore.similarity_search(search_query, k=3)
+                chunks = [doc.page_content.strip() for doc in docs if getattr(doc, "page_content", None)]
+                context_str = "\n\n".join(chunks)
+            except Exception as e:
+                print(f"Similarity search error: {e}")
+                traceback.print_exc()
+
+        # 3. QUIZ GENERATION BRANCH
+        if is_quiz:
+            print(f"🎯 Quiz generation requested for {stock_name} ({target_stock})")
+            quiz_system_instruction = (
+                "You are BharatFinanceEdu, an expert SEBI-aligned Indian financial educator and investor readiness examiner. "
+                "You MUST output ONLY a valid, parseable JSON object matching the required schema. "
+                "Do NOT include any markdown code blocks, backticks (like ```json), or conversational prose. "
+                "Return pure JSON only."
+            )
+
+            quiz_prompt = (
+                f"Generate a 4-question investor readiness and suitability quiz for {stock_name} ({target_stock}).\n\n"
+                f"SEBI/RBI Reference Context:\n{context_str}\n\n"
+                "Generate 4 multiple-choice questions covering these 4 categories:\n"
+                "1. 'Risk Tolerance': downside risk, volatility, Beta, and drawdowns.\n"
+                "2. 'Valuation': P/E, 52-week range, and margin of safety.\n"
+                "3. 'Business Model': cash flows, quarterly profit trends, and operational revenue.\n"
+                "4. 'Capital Allocation': position sizing (keeping single stock under 10-15%), diversification, and emergency funds.\n\n"
+                "Output strictly a JSON object conforming to this exact schema:\n"
+                "{\n"
+                f'  "session_id": "{session_id}",\n'
+                f'  "ticker": "{target_stock}",\n'
+                f'  "stock_name": "{stock_name}",\n'
+                '  "topic": "Investor Readiness & Risk Management",\n'
+                '  "quiz": [\n'
+                '    {\n'
+                '      "category": "Risk Tolerance",\n'
+                '      "question": "Question text quoting risk metrics?",\n'
+                '      "options": {\n'
+                '        "A": "Option text A",\n'
+                '        "B": "Option text B",\n'
+                '        "C": "Option text C",\n'
+                '        "D": "Option text D"\n'
+                '      },\n'
+                '      "correct_answer": "B",\n'
+                '      "explanation": "One clear sentence explaining the SEBI-aligned correct choice."\n'
+                '    }\n'
+                '  ]\n'
+                "}\n\n"
+                "STRICT RULES:\n"
+                "- Exactly 4 questions, each with options A, B, C, D.\n"
+                "- 'correct_answer' must be one of 'A', 'B', 'C', or 'D'.\n"
+                "- Do not output markdown fences or backticks. Return valid JSON only."
+            )
+
+            try:
+                raw_llm_out = generate_text(
+                    prompt_text=quiz_prompt,
+                    max_tokens=max(int(max_tokens), 1024),
+                    system_instruction=quiz_system_instruction,
+                    temperature=0.2
+                )
+                print(f"Raw LLM output (first 150 chars): {raw_llm_out[:150]}")
+                validated_quiz = extract_and_validate_quiz(raw_llm_out, target_stock, session_id)
+                if validated_quiz:
+                    print("✅ Successfully extracted and validated LLM quiz.")
+                    return json.dumps(validated_quiz)
+            except Exception as e:
+                print(f"Error during Quiz LLM generation: {e}")
+                traceback.print_exc()
+
+            print("⚠️ LLM output could not be parsed as valid quiz schema. Using deterministic fallback quiz.")
+            fallback_quiz = generate_fallback_quiz(target_stock, session_id)
+            return json.dumps(fallback_quiz)
+
+        # 4. CHAT / ASSISTANT GENERATION BRANCH
+        chat_system_instruction = (
+            "You are BharatFinanceEdu, an expert Indian financial educator. "
+            "Explain concepts simply, using clear analogies and dispelling misconceptions. "
+            "Base your answers on the provided context. If the user acts impulsively, warn them based on SEBI rules."
+        )
+        if context_str:
+            final_prompt = (
+                f"Reference Context (SEBI/RBI Guidelines from ChromaDB):\n{context_str}\n\n"
+                f"Target Stock: {target_stock}\n\n"
+                f"User Prompt:\n{user_text}"
+            )
+        else:
+            final_prompt = f"Target Stock: {target_stock}\n\nUser Prompt:\n{user_text}"
+
+        try:
+            return generate_text(final_prompt, int(max_tokens), system_instruction=chat_system_instruction)
         except Exception as e:
-            print(f"Similarity search error: {e}")
+            print(f"Error during Chat LLM generation: {e}")
+            traceback.print_exc()
+            return "I am currently connecting to market intelligence servers. Please ask your question again in a moment."
 
-    # 3. QUIZ GENERATION BRANCH
-    if is_quiz:
-        print(f"🎯 Quiz generation requested for {stock_name} ({target_stock})")
-        quiz_system_instruction = (
-            "You are BharatFinanceEdu, an expert SEBI-aligned Indian financial educator and investor readiness examiner. "
-            "You MUST output ONLY a valid, parseable JSON object matching the required schema. "
-            "Do NOT include any markdown code blocks, backticks (like ```json), or conversational prose. "
-            "Return pure JSON only."
-        )
+    except Exception as e:
+        print(f"Error inside predict: {e}")
+        traceback.print_exc()
+        return "I am currently connecting to market intelligence servers. Please ask your question again in a moment."
 
-        quiz_prompt = (
-            f"Generate a 4-question investor readiness and suitability quiz for {stock_name} ({target_stock}).\n\n"
-            f"SEBI/RBI Reference Context:\n{context_str}\n\n"
-            "Generate 4 multiple-choice questions covering these 4 categories:\n"
-            "1. 'Risk Tolerance': downside risk, volatility, Beta, and drawdowns.\n"
-            "2. 'Valuation': P/E, 52-week range, and margin of safety.\n"
-            "3. 'Business Model': cash flows, quarterly profit trends, and operational revenue.\n"
-            "4. 'Capital Allocation': position sizing (keeping single stock under 10-15%), diversification, and emergency funds.\n\n"
-            "Output strictly a JSON object conforming to this exact schema:\n"
-            "{\n"
-            f'  "session_id": "{session_id}",\n'
-            f'  "ticker": "{target_stock}",\n'
-            f'  "stock_name": "{stock_name}",\n'
-            '  "topic": "Investor Readiness & Risk Management",\n'
-            '  "quiz": [\n'
-            '    {\n'
-            '      "category": "Risk Tolerance",\n'
-            '      "question": "Question text quoting risk metrics?",\n'
-            '      "options": {\n'
-            '        "A": "Option text A",\n'
-            '        "B": "Option text B",\n'
-            '        "C": "Option text C",\n'
-            '        "D": "Option text D"\n'
-            '      },\n'
-            '      "correct_answer": "B",\n'
-            '      "explanation": "One clear sentence explaining the SEBI-aligned correct choice."\n'
-            '    }\n'
-            '  ]\n'
-            "}\n\n"
-            "STRICT RULES:\n"
-            "- Exactly 4 questions, each with options A, B, C, D.\n"
-            "- 'correct_answer' must be one of 'A', 'B', 'C', or 'D'.\n"
-            "- Do not output markdown fences or backticks. Return valid JSON only."
-        )
-
-        raw_llm_out = generate_text(
-            prompt_text=quiz_prompt,
-            max_tokens=max(int(max_tokens), 1024),
-            system_instruction=quiz_system_instruction,
-            temperature=0.2
-        )
-        print(f"Raw LLM output (first 150 chars): {raw_llm_out[:150]}")
-
-        validated_quiz = extract_and_validate_quiz(raw_llm_out, target_stock, session_id)
-        if validated_quiz:
-            print("✅ Successfully extracted and validated LLM quiz.")
-            return json.dumps(validated_quiz)
-
-        print("⚠️ LLM output could not be parsed as valid quiz schema. Using deterministic fallback quiz.")
-        fallback_quiz = generate_fallback_quiz(target_stock, session_id)
-        return json.dumps(fallback_quiz)
-
-    # 4. CHAT / ASSISTANT GENERATION BRANCH
-    chat_system_instruction = (
-        "You are BharatFinanceEdu, an expert Indian financial educator. "
-        "Explain concepts simply, using clear analogies and dispelling misconceptions. "
-        "Base your answers on the provided context. If the user acts impulsively, warn them based on SEBI rules."
-    )
-    if context_str:
-        final_prompt = (
-            f"Reference Context (SEBI/RBI Guidelines from ChromaDB):\n{context_str}\n\n"
-            f"Target Stock: {target_stock}\n\n"
-            f"User Prompt:\n{user_text}"
-        )
-    else:
-        final_prompt = f"Target Stock: {target_stock}\n\nUser Prompt:\n{user_text}"
-
-    return generate_text(final_prompt, int(max_tokens), system_instruction=chat_system_instruction)
 
 
 # =====================================================================
