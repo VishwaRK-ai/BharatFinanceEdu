@@ -30,8 +30,13 @@ export default async function SafetyQuizPage({
   searchParams?: Promise<{ start?: string; direct?: string }>;
 }) {
   const { locale, symbol } = await params;
-  const sParams = searchParams ? await searchParams : undefined;
-  const autoStart = sParams?.start === "true" || sParams?.direct === "true";
+  const resolvedSearchParams =
+    searchParams && typeof (searchParams as any).then === "function"
+      ? await searchParams
+      : (searchParams as any);
+  const autoStart =
+    resolvedSearchParams?.start === "true" ||
+    resolvedSearchParams?.direct === "true";
   setRequestLocale(locale);
 
   const t = await getTranslations({ locale, namespace: "safety" });

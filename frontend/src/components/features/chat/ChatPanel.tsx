@@ -61,16 +61,27 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
 
+  const isSendingRef = React.useRef(false);
+
   // fetchHistory contains no setState, and state updates only run inside
   // promise callbacks — keeps the mount effect clear of the
   // react-hooks/set-state-in-effect rule.
   const fetchHistory = React.useCallback(async (): Promise<Message[]> => {
-    const res = await fetch("/api/assistant/history?limit=50", {
-      cache: "no-store",
-    });
-    if (!res.ok) throw new Error(String(res.status));
-    const data: { messages: Message[] } = await res.json();
-    return data.messages;
+    try {
+      const res = await fetch("/api/assistant/history?limit=50", {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        console.warn("[Chatbot] History fetch non-ok status:", res.status);
+        return [];
+      }
+      const data: { messages: Message[] } = await res.json();
+      return Array.isArray(data.messages) ? data.messages : [];
+    } catch (err) {
+      console.warn("[Chatbot] History fetch error, falling back to empty:", err);
+      return [];
+    }
   }, []);
 
   const applyHistory = React.useCallback((rows: Message[] | null) => {
@@ -114,13 +125,22 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
 
   const send = React.useCallback(
     async (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed || trimmed.length > MAX_LENGTH || status === "sending") {
+      const trimmed = (text ?? "").trim();
+      console.log("[Chatbot] send invoked with message length:", trimmed.length);
+      if (!trimmed) {
+        console.warn("[Chatbot] send aborted: message is empty");
+        return;
+      }
+      if (trimmed.length > MAX_LENGTH) {
+        console.warn("[Chatbot] send aborted: message exceeds MAX_LENGTH");
+        return;
+      }
+      if (isSendingRef.current) {
+        console.warn("[Chatbot] send aborted: already sending");
         return;
       }
 
-      console.log("[Chatbot] send invoked with message length:", trimmed.length);
-
+      isSendingRef.current = true;
       setMessages((prev) => [
         ...prev,
         { id: localId("u"), role: "user", content: trimmed },
@@ -130,7 +150,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       setErrorKind(null);
 
       try {
-        console.log("[Chatbot] Dispatching fetch to /api/assistant...");
+        console.log("[Chatbot] Dispatching fetch to /api/assistant with message:", trimmed);
         const res = await fetch("/api/assistant", {
           method: "POST",
           headers: {
@@ -163,14 +183,30 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
         setFailedText(trimmed);
         setErrorKind("send");
         setStatus("idle");
+      } finally {
+        isSendingRef.current = false;
       }
     },
-    [locale, status]
+    [locale]
   );
 
-  const handleSubmit = React.useCallback(() => {
-    void send(input);
-  }, [input, send]);
+  const handleSubmit = React.useCallback(
+    (e?: React.SyntheticEvent) => {
+      if (e) {
+        if (typeof e.preventDefault === "function") e.preventDefault();
+        if (typeof e.stopPropagation === "function") e.stopPropagation();
+      }
+      const rawText = input || inputRef.current?.value || "";
+      const textToSend = rawText.trim();
+      console.log("[Chatbot] handleSubmit triggered, text to send:", textToSend);
+      if (!textToSend) {
+        console.warn("[Chatbot] Cannot submit empty text");
+        return;
+      }
+      void send(textToSend);
+    },
+    [input, send]
+  );
 
   const retry = React.useCallback(() => {
     if (errorKind === "history") {

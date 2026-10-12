@@ -242,26 +242,40 @@ export function SafetyQuizFlow({
     }
   }, [locale, startQuiz, stock, stockName]);
 
+  const hasTriggeredRef = React.useRef(false);
+
+  // 1. Initialize flow store and restore persisted state on mount
   React.useEffect(() => {
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) return;
-      begin({ ticker: stock, stockName });
-      const restored = restore(stock);
-      const current = useSafetyFlow.getState();
-      if (restored && current.step === "quiz" && current.questions.length > 0) {
-        setQuizPhase("questions");
-      } else if (autoStart) {
-        console.log("[Quiz Trigger] Auto-starting quiz generation due to autoStart prop");
-        useSafetyFlow.setState({ step: "scan" });
-        startQuizFlow();
-      }
-      setHydrated(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [autoStart, begin, restore, startQuizFlow, stock, stockName]);
+    begin({ ticker: stock, stockName });
+    const restored = restore(stock);
+    const current = useSafetyFlow.getState();
+    if (restored && current.step === "quiz" && Array.isArray(current.questions) && current.questions.length > 0) {
+      setQuizPhase("questions");
+    }
+    setHydrated(true);
+  }, [begin, restore, stock, stockName]);
+
+  // 2. Reliable auto-start trigger once hydrated and ready
+  React.useEffect(() => {
+    if (!hydrated) return;
+    if (hasTriggeredRef.current) return;
+
+    const isStartRequested =
+      autoStart ||
+      (typeof window !== "undefined" &&
+        (new URLSearchParams(window.location.search).get("start") === "true" ||
+         new URLSearchParams(window.location.search).get("direct") === "true"));
+
+    const current = useSafetyFlow.getState();
+    const hasQuestions = Array.isArray(current.questions) && current.questions.length > 0;
+
+    if (isStartRequested && !hasQuestions) {
+      hasTriggeredRef.current = true;
+      console.log("[Quiz Trigger] Auto-start condition met, reliably firing startQuizFlow for ticker:", stock);
+      useSafetyFlow.setState({ step: "scan" });
+      startQuizFlow();
+    }
+  }, [hydrated, autoStart, startQuizFlow, stock]);
 
   const skipScan = React.useCallback(() => {
     console.log("[Quiz Trigger] skipScan invoked - clearing scan and starting quiz");
