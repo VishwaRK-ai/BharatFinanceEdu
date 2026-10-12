@@ -24,8 +24,8 @@ async def generate_quiz(request: Request):
     user = os.getenv("AZURE_API_USER", "")
     pwd = os.getenv("AZURE_API_PASS", "")
     
-    # Updated to /run/predict for modern Gradio servers
-    response = requests.post(f"{azure_url}/run/predict", json={"data": [payload]}, auth=(user, pwd))
+    # Reverted back to /api/predict
+    response = requests.post(f"{azure_url}/api/predict", json={"data": [payload]}, auth=(user, pwd))
     return response.json()
 
 @app.post("/chat")
@@ -35,5 +35,5 @@ async def chat(request: Request):
     user = os.getenv("AZURE_API_USER", "")
     pwd = os.getenv("AZURE_API_PASS", "")
     
-    response = requests.post(f"{azure_url}/run/predict", json={"data": [payload]}, auth=(user, pwd))
+    response = requests.post(f"{azure_url}/api/predict", json={"data": [payload]}, auth=(user, pwd))
     return response.json()
