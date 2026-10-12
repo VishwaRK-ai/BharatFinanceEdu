@@ -8,10 +8,10 @@ import { db } from "@/db";
 import { fomoProfiles } from "@/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { matchQuizStock, saveSafetyQuiz } from "@/lib/safety";
-import { apiRequireVisitor } from "@/lib/visitor";
+import { apiRequireVisitor, VISITOR_COOKIE } from "@/lib/visitor";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 const postBodySchema = z.object({
   ticker: z.string().trim().min(1).max(40),
@@ -46,12 +46,24 @@ async function loadFomo(
  * personalisation extras are ignored by the backend unless it opts in).
  */
 export async function POST(request: NextRequest) {
+  const incomingCookie = request.cookies.get(VISITOR_COOKIE)?.value;
+  console.log(`[/api/safety-quiz] Incoming POST request received from client:`, {
+    url: request.url,
+    method: request.method,
+    hasVisitorCookie: !!incomingCookie,
+    visitorPreview: incomingCookie ? `${incomingCookie.slice(0, 8)}...` : "(none)",
+  });
+
   const auth = apiRequireVisitor(request);
-  if ("response" in auth) return auth.response;
+  if ("response" in auth) {
+    console.warn(`[/api/safety-quiz] Visitor auth check failed: missing or invalid ${VISITOR_COOKIE} cookie.`);
+    return auth.response;
+  }
   const { visitorId } = auth;
 
   const limit = rateLimit(`safety-start:${visitorId}`, 6, 600_000);
   if (!limit.ok) {
+    console.warn(`[/api/safety-quiz] Rate limit hit for visitor ${visitorId.slice(0, 8)}...`);
     return NextResponse.json(
       { error: "rate_limited", message: "Too many quiz starts. Wait a few minutes." },
       {

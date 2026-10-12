@@ -107,53 +107,157 @@ export function SafetyQuizFlow({
   }, [begin, restore, stock, stockName]);
 
   const startQuizFlow = React.useCallback(() => {
+    console.log("[Quiz Trigger] startQuizFlow invoked", {
+      stockProp: stock,
+      stockNameProp: stockName,
+      locale,
+    });
     setErrorKind("generic");
     setGenerating(true);
-    const flow = useSafetyFlow.getState();
-    const summary = flow.scan
-      ? {
-          risk_level: flow.scan.risk_level,
-          flags: flow.scan.red_flags.map((flag) => flag.title),
-        }
-      : undefined;
-    fetch("/api/safety-quiz", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-locale": locale },
-      body: JSON.stringify({
-        ticker: stock,
-        locale,
-        ...(flow.tipSource ? { tipSource: flow.tipSource } : {}),
-        ...(summary ? { scanSummary: summary } : {}),
-      }),
-    })
-      .then(async (response) => {
-        const body: unknown = await response.json().catch(() => null);
-        if (!response.ok) {
-          const code =
-            typeof body === "object" && body !== null && "error" in body
-              ? (body as { error?: unknown }).error
-              : response.status;
-          return Promise.reject(code);
-        }
-        return body as StartResponse;
-      })
-      .then((data) => {
-        startQuiz({
-          quizId: data.quizId ?? null,
-          topic: data.topic ?? null,
-          questions: data.questions,
-        });
-        setQuizPhase("questions");
-        setGenerating(false);
-      })
-      .catch((err: unknown) => {
-        setErrorKind(errorKindOf(err));
+
+    try {
+      const flow = useSafetyFlow.getState();
+      console.log("[Quiz Trigger] Current safety flow store state:", {
+        step: flow.step,
+        storeTicker: flow.ticker,
+        tipSource: flow.tipSource,
+        hasScan: !!flow.scan,
+        scanRisk: flow.scan?.risk_level,
+        scanFlagsCount: Array.isArray(flow.scan?.red_flags)
+          ? flow.scan.red_flags.length
+          : 0,
+      });
+
+      const effectiveTicker = (stock || flow.ticker || "").trim();
+      if (!effectiveTicker) {
+        console.error(
+          "[Quiz Trigger] Aborting quiz generation: empty stock ticker!",
+          { stock, storeTicker: flow.ticker }
+        );
+        setErrorKind("generic");
         setQuizPhase("startError");
         setGenerating(false);
-      });
-  }, [locale, startQuiz, stock]);
+        return;
+      }
+
+      let summary: { risk_level: string; flags: string[] } | undefined = undefined;
+      if (flow.scan) {
+        const rawFlags = Array.isArray(flow.scan.red_flags)
+          ? flow.scan.red_flags
+          : [];
+        const flags: string[] = rawFlags
+          .map((flag: unknown) => {
+            if (typeof flag === "string") return flag;
+            if (
+              flag &&
+              typeof flag === "object" &&
+              "title" in flag &&
+              typeof (flag as { title?: unknown }).title === "string"
+            ) {
+              return (flag as { title: string }).title;
+            }
+            if (
+              flag &&
+              typeof flag === "object" &&
+              "code" in flag &&
+              typeof (flag as { code?: unknown }).code === "string"
+            ) {
+              return (flag as { code: string }).code;
+            }
+            return "";
+          })
+          .filter(Boolean);
+
+        summary = {
+          risk_level: flow.scan.risk_level ?? "low",
+          flags,
+        };
+      }
+
+      const payload = {
+        ticker: effectiveTicker,
+        locale: locale || "en",
+        ...(flow.tipSource ? { tipSource: flow.tipSource } : {}),
+        ...(summary ? { scanSummary: summary } : {}),
+      };
+
+      console.log(
+        "[Quiz Trigger] Dispatching fetch to /api/safety-quiz with payload:",
+        payload
+      );
+
+      fetch("/api/safety-quiz", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-locale": locale },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      })
+        .then(async (response) => {
+          console.log(
+            `[Quiz Trigger] Received response status from /api/safety-quiz: ${response.status} (${response.statusText})`
+          );
+          const body: unknown = await response.json().catch((err) => {
+            console.warn(
+              "[Quiz Trigger] Failed to parse response body as JSON:",
+              err
+            );
+            return null;
+          });
+          if (!response.ok) {
+            console.error(
+              `[Quiz Trigger] /api/safety-quiz returned non-200 status ${response.status}:`,
+              body
+            );
+            const code =
+              typeof body === "object" && body !== null && "error" in body
+                ? (body as { error?: unknown }).error
+                : response.status;
+            return Promise.reject(code);
+          }
+          return body as StartResponse;
+        })
+        .then((data) => {
+          console.log("[Quiz Trigger] Quiz generation succeeded. Received payload:", {
+            quizId: data?.quizId,
+            topic: data?.topic,
+            questionsCount: Array.isArray(data?.questions)
+              ? data.questions.length
+              : 0,
+          });
+          if (!data || !Array.isArray(data.questions) || data.questions.length === 0) {
+            console.error(
+              "[Quiz Trigger] Invalid response: questions array is missing or empty:",
+              data
+            );
+            throw new Error("empty_questions");
+          }
+          startQuiz({
+            quizId: data.quizId ?? null,
+            topic: data.topic ?? null,
+            questions: data.questions,
+          });
+          setQuizPhase("questions");
+          setGenerating(false);
+        })
+        .catch((err: unknown) => {
+          console.error("[Quiz Trigger] Quiz generation flow caught error:", err);
+          setErrorKind(errorKindOf(err));
+          setQuizPhase("startError");
+          setGenerating(false);
+        });
+    } catch (err: unknown) {
+      console.error(
+        "[Quiz Trigger] Unexpected synchronous exception in startQuizFlow before fetch:",
+        err
+      );
+      setErrorKind("generic");
+      setQuizPhase("startError");
+      setGenerating(false);
+    }
+  }, [locale, startQuiz, stock, stockName]);
 
   const skipScan = React.useCallback(() => {
+    console.log("[Quiz Trigger] skipScan invoked - clearing scan and starting quiz");
     useSafetyFlow.setState({ scan: null });
     startQuizFlow();
   }, [startQuizFlow]);
@@ -162,6 +266,10 @@ export function SafetyQuizFlow({
   // source, drop any scan, and go straight to the quiz.
   const skipScreenshot = React.useCallback(
     (source: string) => {
+      console.log(
+        "[Quiz Trigger] skipScreenshot invoked - saving tipSource and starting quiz:",
+        source
+      );
       useSafetyFlow.setState({ tipSource: source, scan: null, step: "scan" });
       startQuizFlow();
     },

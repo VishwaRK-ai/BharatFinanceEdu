@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 import yfinance as yf
 from gradio_client import Client
 from PIL import Image, UnidentifiedImageError
@@ -541,6 +542,14 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="BharatFinanceEdu API", version="2.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
