@@ -14,6 +14,7 @@ import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import { apiRequireVisitor, VISITOR_COOKIE } from "@/lib/visitor";
 
 /** LLM replies can be slow — set to 60 s for standard Vercel serverless duration. */
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /** The client sends its current locale explicitly; cookie is the fallback. */

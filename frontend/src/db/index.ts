@@ -6,12 +6,30 @@
  * the client bundle.
  */
 import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { drizzle, type NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getServerEnv } from "@/lib/env";
 import * as schema from "./schema";
 
-const sql = neon(getServerEnv().DATABASE_URL);
+let _db: NeonHttpDatabase<typeof schema> | null = null;
 
-export const db = drizzle({ client: sql, schema });
+export function getDb(): NeonHttpDatabase<typeof schema> {
+  if (!_db) {
+    const env = getServerEnv();
+    const sql = neon(env.DATABASE_URL);
+    _db = drizzle({ client: sql, schema });
+  }
+  return _db;
+}
 
-export type Database = typeof db;
+export const db = new Proxy({} as NeonHttpDatabase<typeof schema>, {
+  get(_target, prop, receiver) {
+    const instance = getDb();
+    const value = Reflect.get(instance, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(instance);
+    }
+    return value;
+  },
+});
+
+export type Database = NeonHttpDatabase<typeof schema>;

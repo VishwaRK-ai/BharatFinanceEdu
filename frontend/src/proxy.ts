@@ -47,26 +47,25 @@ function appPathLocale(pathname: string): Locale | null {
 }
 
 export function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  const isApi = pathname.startsWith("/api");
+  try {
+    const { pathname } = request.nextUrl;
+    if (pathname.startsWith("/api")) {
+      return NextResponse.next();
+    }
 
-  // --- 1. Visitor cookie -------------------------------------------------
-  const existing = request.cookies.get(VISITOR_COOKIE)?.value;
-  const hasValid = isValidVisitorId(existing);
-  const visitorId = hasValid ? (existing as string) : crypto.randomUUID();
+    // --- 1. Visitor cookie -------------------------------------------------
+    const existing = request.cookies.get(VISITOR_COOKIE)?.value;
+    const hasValid = isValidVisitorId(existing);
+    const visitorId = hasValid ? (existing as string) : crypto.randomUUID();
 
-  let response: NextResponse;
-
-  if (isApi) {
-    // Never forward a fresh id into API handlers (guards must 401 first).
-    response = NextResponse.next();
-  } else {
     // Forward the id on the request so this same render can read it via
     // next/headers cookies(); next-intl copies request.headers when it
     // builds its NextResponse.next({request: {headers}}).
     if (!hasValid) {
       request.cookies.set(VISITOR_COOKIE, visitorId);
     }
+
+    let response: NextResponse;
 
     // --- 2. First-run language gate --------------------------------------
     const locale = appPathLocale(pathname);
@@ -106,25 +105,30 @@ export function proxy(request: NextRequest) {
         });
       }
     }
-  }
 
-  if (!hasValid) {
-    response.cookies.set(VISITOR_COOKIE, visitorId, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: VISITOR_MAX_AGE,
-    });
-  }
+    if (!hasValid) {
+      response.cookies.set(VISITOR_COOKIE, visitorId, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: VISITOR_MAX_AGE,
+      });
+    }
 
-  return response;
+    return response;
+  } catch (error) {
+    console.error("[Proxy/Middleware] Unhandled error during request processing:", error);
+    return NextResponse.next();
+  }
 }
 
+export const middleware = proxy;
+
 export const config = {
-  // Everything except Next.js internals, static assets and /api (which is
-  // handled above without the gate and without next-intl).
+  // Explicitly ignore all /api/ routes, static files, and Next.js internal paths
   matcher: [
-    "/((?!api|_next/|favicon\\.ico|.*\\.(?:png|jpg|jpeg|webp|gif|svg|ico|txt|xml|woff2?|ttf|map)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
+
