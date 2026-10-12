@@ -212,17 +212,31 @@ export async function assistant(input: AssistantInput): Promise<AssistantRespons
     }
 
     const parsed = assistantResponseSchema.safeParse(data);
-    if (!parsed.success) {
-      if (typeof data === "object" && data !== null && "reply" in data) {
+    if (parsed.success) {
+      return parsed.data;
+    }
+
+    if (typeof data === "object" && data !== null) {
+      const obj = data as Record<string, unknown>;
+      const candidateReply =
+        obj.reply ?? obj.response ?? obj.message ?? obj.content;
+      if (typeof candidateReply === "string" && candidateReply.trim().length > 0) {
         return {
-          reply: String((data as { reply: unknown }).reply),
-          rag_sources_used: Boolean((data as { rag_sources_used?: unknown }).rag_sources_used),
-          live_data_used: Boolean((data as { live_data_used?: unknown }).live_data_used),
+          reply: candidateReply.trim(),
+          rag_sources_used: Boolean(obj.rag_sources_used),
+          live_data_used: Boolean(obj.live_data_used),
         };
       }
-      throw new BackendError("bad_response", undefined, response.status);
+    } else if (typeof data === "string" && data.trim().length > 0) {
+      return {
+        reply: data.trim(),
+        rag_sources_used: false,
+        live_data_used: false,
+      };
     }
-    return parsed.data;
+
+    console.error(`[Vercel->Render] assistantResponseSchema parse failed on:`, data);
+    throw new BackendError("bad_response", undefined, response.status);
   } finally {
     clearTimeout(timer);
   }

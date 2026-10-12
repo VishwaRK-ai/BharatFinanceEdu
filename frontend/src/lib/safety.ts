@@ -220,11 +220,15 @@ for (const target of Object.values(TICKER_MAP)) {
 export function matchQuizStock(input: string): string | null {
   const key = input.trim().toLowerCase();
   if (!key) return null;
-  return (
+  const mapped =
     TICKER_MAP[key] ??
-    TICKER_REVERSE.get(key.replace(/\.ns$/, "")) ??
-    null
-  );
+    TICKER_REVERSE.get(key.replace(/\.ns$/, ""));
+  if (mapped) return mapped;
+  const bare = key.replace(/\.ns$/, "").toUpperCase();
+  if (/^[A-Z0-9&-]{1,20}$/.test(bare)) {
+    return `${bare}.NS`;
+  }
+  return null;
 }
 
 /** URL/yahoo symbol for a backend `.NS` target (strips the suffix). */

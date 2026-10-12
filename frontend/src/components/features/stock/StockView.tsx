@@ -428,7 +428,7 @@ export function StockView({
               {t("cta.body")}
             </p>
             <Link
-              href={`/safety-quiz/${detail.symbol}`}
+              href={`/safety-quiz/${detail.symbol}?start=true`}
               className={cn(buttonVariants({ size: "lg" }), "mt-4 w-full")}
             >
               {t("cta.button")}
@@ -640,7 +640,7 @@ export function StockView({
       {/* Fixed bottom pill bar (mobile/tablet only — desktop uses the sidebar CTA) */}
       <div className="fixed inset-x-4 bottom-20 z-30 md:inset-x-auto md:bottom-6 md:left-1/2 md:w-full md:max-w-md md:-translate-x-1/2 lg:hidden">
         <Link
-          href={`/safety-quiz/${detail.symbol}`}
+          href={`/safety-quiz/${detail.symbol}?start=true`}
           className={cn(
             buttonVariants({ size: "lg" }),
             "w-full shadow-2xl shadow-blue-600/30"

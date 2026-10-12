@@ -12,7 +12,7 @@ import { apiRequireVisitor } from "@/lib/visitor";
  * written to disk/DB/logs.
  */
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 

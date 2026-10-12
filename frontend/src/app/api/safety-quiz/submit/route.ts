@@ -8,7 +8,7 @@ import { getSavedQuiz, gradeQuiz } from "@/lib/safety";
 import { apiRequireVisitor } from "@/lib/visitor";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 /**
  * Grade the quiz against the backend, compute our verdict (PRD B5 rules —

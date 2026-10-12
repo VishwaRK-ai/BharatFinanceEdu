@@ -119,6 +119,8 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
         return;
       }
 
+      console.log("[Chatbot] send invoked with message length:", trimmed.length);
+
       setMessages((prev) => [
         ...prev,
         { id: localId("u"), role: "user", content: trimmed },
@@ -128,21 +130,26 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       setErrorKind(null);
 
       try {
+        console.log("[Chatbot] Dispatching fetch to /api/assistant...");
         const res = await fetch("/api/assistant", {
           method: "POST",
           headers: {
             "content-type": "application/json",
             "x-locale": locale,
           },
+          credentials: "same-origin",
           body: JSON.stringify({ message: trimmed }),
         });
+        console.log(`[Chatbot] Received response status from /api/assistant: ${res.status}`);
         if (!res.ok) {
           const body: { error?: string } | null = await res
             .json()
             .catch(() => null);
+          console.error("[Chatbot] API responded with error status:", res.status, body);
           throw new Error(body?.error ?? "upstream");
         }
         const data: { reply: string } = await res.json();
+        console.log("[Chatbot] Assistant reply received successfully, length:", data.reply?.length);
         setMessages((prev) => [
           ...prev,
           { id: localId("a"), role: "assistant", content: data.reply },
@@ -151,6 +158,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
         // The reply may have changed the language-applied FOMO signal.
         useFomoStore.getState().refresh();
       } catch (err) {
+        console.error("[Chatbot] Error during assistant query:", err);
         setErrorCode(err instanceof Error ? err.message : "upstream");
         setFailedText(trimmed);
         setErrorKind("send");

@@ -8,6 +8,7 @@ import { apiRequireVisitor } from "@/lib/visitor";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const postBodySchema = z.object({ answers: answersSchema });
 

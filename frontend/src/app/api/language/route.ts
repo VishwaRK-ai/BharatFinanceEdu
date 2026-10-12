@@ -3,6 +3,7 @@ import { isLocale, type Locale } from "@/i18n/routing";
 import { LANG_COOKIE, INTL_LOCALE_COOKIE } from "@/lib/lang-cookie";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const YEAR = 60 * 60 * 24 * 365;
 

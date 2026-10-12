@@ -30,7 +30,7 @@ import { apiRequireVisitor } from "@/lib/visitor";
  */
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const ALLOWED_MIME = ["image/png", "image/jpeg", "image/webp"] as const;

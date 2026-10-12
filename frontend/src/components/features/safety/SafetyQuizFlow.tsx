@@ -57,9 +57,11 @@ function errorKindOf(err: unknown): ErrorKind {
 export function SafetyQuizFlow({
   stock,
   stockName,
+  autoStart = false,
 }: {
   stock: string;
   stockName: string;
+  autoStart?: boolean;
 }) {
   const t = useTranslations("safety");
   const locale = useLocale();
@@ -89,22 +91,6 @@ export function SafetyQuizFlow({
   const [generating, setGenerating] = React.useState(false);
   const [quizPhase, setQuizPhase] = React.useState<QuizPhase>("idle");
   const [errorKind, setErrorKind] = React.useState<ErrorKind>("generic");
-
-  React.useEffect(() => {
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) return;
-      begin({ ticker: stock, stockName });
-      const restored = restore(stock);
-      if (restored && useSafetyFlow.getState().step === "quiz") {
-        setQuizPhase("questions");
-      }
-      setHydrated(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [begin, restore, stock, stockName]);
 
   const startQuizFlow = React.useCallback(() => {
     console.log("[Quiz Trigger] startQuizFlow invoked", {
@@ -255,6 +241,27 @@ export function SafetyQuizFlow({
       setGenerating(false);
     }
   }, [locale, startQuiz, stock, stockName]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      begin({ ticker: stock, stockName });
+      const restored = restore(stock);
+      const current = useSafetyFlow.getState();
+      if (restored && current.step === "quiz" && current.questions.length > 0) {
+        setQuizPhase("questions");
+      } else if (autoStart) {
+        console.log("[Quiz Trigger] Auto-starting quiz generation due to autoStart prop");
+        useSafetyFlow.setState({ step: "scan" });
+        startQuizFlow();
+      }
+      setHydrated(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [autoStart, begin, restore, startQuizFlow, stock, stockName]);
 
   const skipScan = React.useCallback(() => {
     console.log("[Quiz Trigger] skipScan invoked - clearing scan and starting quiz");

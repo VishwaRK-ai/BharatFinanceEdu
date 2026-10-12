@@ -180,12 +180,8 @@ export function SourceStep({
   }
 
   function skipScan(): void {
-    if (!tipSource) {
-      setValidation(t("step1.sourceRequired"));
-      return;
-    }
     setValidation(null);
-    onSkip?.(tipSource);
+    onSkip?.(tipSource || "Direct research");
   }
 
   if (phase === "scanning") {

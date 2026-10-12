@@ -11,10 +11,10 @@ import {
   type ChatTurn,
 } from "@/lib/backend/schemas";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
-import { apiRequireVisitor } from "@/lib/visitor";
+import { apiRequireVisitor, VISITOR_COOKIE } from "@/lib/visitor";
 
-/** LLM replies can be slow — allow up to 90 s upstream + overhead. */
-export const maxDuration = 120;
+/** LLM replies can be slow — set to 60 s for standard Vercel serverless duration. */
+export const maxDuration = 60;
 
 /** The client sends its current locale explicitly; cookie is the fallback. */
 function resolveLocale(request: NextRequest): Locale {
@@ -26,8 +26,19 @@ function resolveLocale(request: NextRequest): Locale {
 }
 
 export async function POST(request: NextRequest) {
+  const cookieVid = request.cookies.get(VISITOR_COOKIE)?.value;
+  console.log(`[/api/assistant] Incoming POST request:`, {
+    url: request.url,
+    method: request.method,
+    hasVisitorCookie: !!cookieVid,
+    visitorPreview: cookieVid ? `${cookieVid.slice(0, 8)}...` : "(none)",
+  });
+
   const auth = apiRequireVisitor(request);
-  if ("response" in auth) return auth.response;
+  if ("response" in auth) {
+    console.warn(`[/api/assistant] Visitor auth check failed: missing or invalid ${VISITOR_COOKIE} cookie.`);
+    return auth.response;
+  }
   const { visitorId } = auth;
 
   // 20 requests/minute per visitor AND per IP (clearing cookies mints a new

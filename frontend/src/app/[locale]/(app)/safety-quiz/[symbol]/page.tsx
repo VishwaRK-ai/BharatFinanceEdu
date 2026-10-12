@@ -24,10 +24,14 @@ export async function generateMetadata({ params }: { params: Promise<QuizPagePar
 
 export default async function SafetyQuizPage({
   params,
+  searchParams,
 }: {
   params: Promise<QuizPageParams>;
+  searchParams?: Promise<{ start?: string; direct?: string }>;
 }) {
   const { locale, symbol } = await params;
+  const sParams = searchParams ? await searchParams : undefined;
+  const autoStart = sParams?.start === "true" || sParams?.direct === "true";
   setRequestLocale(locale);
 
   const t = await getTranslations({ locale, namespace: "safety" });
@@ -77,7 +81,7 @@ export default async function SafetyQuizPage({
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-6 md:py-8">
-      <SafetyQuizFlow stock={upper} stockName={stockName} />
+      <SafetyQuizFlow stock={upper} stockName={stockName} autoStart={autoStart} />
     </div>
   );
 }
