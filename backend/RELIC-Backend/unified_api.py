@@ -13,6 +13,7 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="BharatFinanceEdu Proxy API")
 
+# Enable CORS middleware for frontend cross-origin requests
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
