@@ -81,7 +81,9 @@ print('Loading 4.4GB GGUF model into CPU RAM...')
 llm = LlamaCpp(
     model_path='Qwen2.5-7B-Instruct.Q4_K_M.gguf',
     n_ctx=4096,
-    max_tokens=1024,
+    max_tokens=200,
+    temperature=0.3,
+    repeat_penalty=1.2,
     n_threads=4,
 )
 
