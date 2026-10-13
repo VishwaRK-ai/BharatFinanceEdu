@@ -46,10 +46,11 @@ def get_stock_display_name(ticker: Optional[str]) -> str:
 # 1. CHROMADB VECTORSTORE INITIALIZATION
 # =====================================================================
 CHROMA_PATH = "/home/azureuser/backend/RELIC-Backend/chroma_db"
-print("Initializing embedding model 'all-MiniLM-L6-v2'...")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+print(f"Initializing embedding model '{EMBEDDING_MODEL}'...")
 embeddings = None
 try:
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 except Exception as e_emb:
     print(f"Warning: HuggingFaceEmbeddings could not be loaded: {e_emb}")
 
