@@ -150,8 +150,8 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       setErrorKind(null);
 
       try {
-        console.log("[Chatbot] Dispatching fetch to /api/assistant with message:", trimmed);
-        const res = await fetch("/api/assistant", {
+        console.log("[Chatbot] Dispatching fetch to /api/chat with message:", trimmed);
+        const res = await fetch("/api/chat", {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -160,19 +160,20 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
           credentials: "same-origin",
           body: JSON.stringify({ message: trimmed }),
         });
-        console.log(`[Chatbot] Received response status from /api/assistant: ${res.status}`);
+        console.log(`[Chatbot] Received response status from /api/chat: ${res.status}`);
         if (!res.ok) {
-          const body: { error?: string } | null = await res
+          const body: { error?: string; detail?: string } | null = await res
             .json()
             .catch(() => null);
           console.error("[Chatbot] API responded with error status:", res.status, body);
-          throw new Error(body?.error ?? "upstream");
+          throw new Error(body?.error ?? body?.detail ?? "upstream");
         }
-        const data: { reply: string } = await res.json();
-        console.log("[Chatbot] Assistant reply received successfully, length:", data.reply?.length);
+        const data: { reply?: string; response?: string } = await res.json();
+        const replyText = data.reply ?? data.response ?? "";
+        console.log("[Chatbot] Assistant reply received successfully, length:", replyText.length);
         setMessages((prev) => [
           ...prev,
-          { id: localId("a"), role: "assistant", content: data.reply },
+          { id: localId("a"), role: "assistant", content: replyText },
         ]);
         setStatus("idle");
         // The reply may have changed the language-applied FOMO signal.
