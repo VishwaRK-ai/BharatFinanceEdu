@@ -150,8 +150,8 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       setErrorKind(null);
 
       try {
-        console.log("[Chatbot] Dispatching fetch to Cloudflare tunnel with message:", trimmed);
-        const res = await fetch("https://developers-shoppers-myrtle-advise.trycloudflare.com/chat", {
+        console.log("[Chatbot] Dispatching fetch to Pinggy tunnel with message:", trimmed);
+        const res = await fetch("https://lwoho-20-41-114-241.free.pinggy.net/chat", {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -159,7 +159,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
           },
           body: JSON.stringify({ message: trimmed }),
         });
-        console.log(`[Chatbot] Received response status from Cloudflare tunnel: ${res.status}`);
+        console.log(`[Chatbot] Received response status from Pinggy tunnel: ${res.status}`);
         if (!res.ok) {
           const body: { error?: string; detail?: string } | null = await res
             .json()

@@ -171,11 +171,11 @@ export function SafetyQuizFlow({
       };
 
       console.log(
-        "[Quiz Trigger] Client-side fetch to Cloudflare tunnel quiz with payload:",
+        "[Quiz Trigger] Client-side fetch to Pinggy tunnel quiz with payload:",
         payload
       );
 
-      const response = await fetch("https://developers-shoppers-myrtle-advise.trycloudflare.com/quiz", {
+      const response = await fetch("https://lwoho-20-41-114-241.free.pinggy.net/quiz", {
         method: "POST",
         headers: { "content-type": "application/json", "x-locale": locale },
         body: JSON.stringify(payload),
