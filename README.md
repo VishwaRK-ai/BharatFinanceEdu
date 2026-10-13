@@ -4,6 +4,9 @@
 
 ### Protecting India's First-Time Investor from FOMO, Scams and Impulsive Decisions
 
+[![Live Demo](https://shields.io)](https://bharat-finance-edu.vercel.app/)
+
+
 **Team: RELIC** | Hackathon: SANGYAN | Track: **Open Innovation**
 
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
