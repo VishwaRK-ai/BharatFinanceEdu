@@ -4,7 +4,6 @@ import json
 import traceback
 from typing import Any, Dict, List, Optional
 
-import torch
 import gradio as gr
 
 from langchain_community.vectorstores import Chroma
@@ -74,68 +73,17 @@ if embeddings is not None:
             vectorstore = None
 
 # =====================================================================
-# 2. MODEL LOADING (LLAMACPP / UNSLOTH / TRANSFORMERS)
+# 2. MODEL LOADING (LLAMACPP)
 # =====================================================================
-# Global references for LLM instances
-llm = None
-model = None
-tokenizer = None
+from langchain_community.llms import LlamaCpp
+print('Loading 4.4GB GGUF model into CPU RAM...')
+llm = LlamaCpp(
+    model_path='Qwen2.5-7B-Instruct.Q4_K_M.gguf',
+    n_ctx=4096,
+    max_tokens=1024,
+    n_threads=4,
+)
 
-# 2a. Attempt loading LlamaCpp instance if available / configured
-try:
-    from langchain_community.llms import LlamaCpp
-    llm_path = os.getenv("LLM_MODEL_PATH", "/home/azureuser/backend/RELIC-Backend/bharat_finance_model.gguf")
-    if os.path.exists(llm_path):
-        print(f"Loading LlamaCpp model from {llm_path}...")
-        llm = LlamaCpp(
-            model_path=llm_path,
-            n_ctx=2048,
-            temperature=0.3,
-            max_tokens=512,
-            verbose=False,
-        )
-        print("✅ LlamaCpp model loaded successfully.")
-except Exception as e_llamacpp:
-    print(f"LlamaCpp load bypassed/not found: {e_llamacpp}")
-
-# 2b. Fallback to Unsloth / Transformers if LlamaCpp is not loaded
-if llm is None:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Serving on device: {device}")
-    try:
-        from unsloth import FastLanguageModel
-        print("Loading model using Unsloth FastLanguageModel...")
-        model_path = "/home/azureuser/backend/RELIC-Backend/bharat_finance_model"
-        if not os.path.exists(model_path):
-            model_path = "bharat_finance_model" if os.path.exists("bharat_finance_model") else "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
-        
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_path,
-            max_seq_length=2048,
-            dtype=None,
-        )
-        FastLanguageModel.for_inference(model)
-        print("✅ Fine-tuned Unsloth model loaded successfully.")
-    except Exception as e_unsloth:
-        print(f"Unsloth load bypassed/failed: {e_unsloth}. Trying transformers AutoModelForCausalLM...")
-        try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            model_path = "/home/azureuser/backend/RELIC-Backend/bharat_finance_model"
-            if not os.path.exists(model_path):
-                model_path = "bharat_finance_model" if os.path.exists("bharat_finance_model") else "Qwen/Qwen2.5-7B-Instruct"
-
-            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                device_map="auto" if torch.cuda.is_available() else None,
-                trust_remote_code=True,
-            )
-            print("✅ Transformers model loaded successfully.")
-        except Exception as e_trans:
-            print(f"⚠️ Transformers model load warning: {e_trans}")
-            model = None
-            tokenizer = None
 
 
 
@@ -344,11 +292,9 @@ def generate_text(
     temperature: float = 0.3
 ) -> str:
     """
-    Generate LLM completion from prompt.
-    Supports LlamaCpp instance (`llm.invoke(prompt)` or `llm(prompt)`)
-    as well as Unsloth / HuggingFace Transformers (`model.generate`).
+    Generate LLM completion from prompt using LlamaCpp.
     """
-    global llm, model, tokenizer
+    global llm
 
     if system_instruction is None:
         system_instruction = (
@@ -357,7 +303,6 @@ def generate_text(
             "Base your answers on the provided context. If the user acts impulsively, warn them based on SEBI rules."
         )
 
-    # 1. Check if LlamaCpp instance (`llm`) is available
     if llm is not None:
         try:
             full_prompt = f"{system_instruction}\n\n{prompt_text}"
@@ -382,38 +327,7 @@ def generate_text(
             traceback.print_exc()
             raise e
 
-    # 2. Check if HuggingFace / Unsloth model is available
-    if model is not None and tokenizer is not None:
-        try:
-            messages = [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt_text},
-            ]
-            inputs = tokenizer.apply_chat_template(
-                messages,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_tensors="pt",
-            )
-            if torch.cuda.is_available():
-                inputs = inputs.to("cuda")
-
-            with torch.inference_mode():
-                outputs = model.generate(
-                    input_ids=inputs,
-                    max_new_tokens=int(max_tokens),
-                    temperature=temperature,
-                    use_cache=True,
-                )
-            response = tokenizer.batch_decode(outputs[:, inputs.shape[1]:], skip_special_tokens=True)[0]
-            return response.strip()
-        except Exception as e:
-            print(f"Error during Transformers/Unsloth generation: {e}")
-            traceback.print_exc()
-            raise e
-
-    # 3. Neither model is initialized
-    print("Error: Neither LlamaCpp (`llm`) nor Transformers (`model`) is initialized.")
+    print("Error: LlamaCpp (`llm`) is not initialized.")
     raise RuntimeError("Model is not initialized.")
 
 
