@@ -92,7 +92,7 @@ export function SafetyQuizFlow({
   const [quizPhase, setQuizPhase] = React.useState<QuizPhase>("idle");
   const [errorKind, setErrorKind] = React.useState<ErrorKind>("generic");
 
-  const startQuizFlow = React.useCallback(() => {
+  const startQuizFlow = React.useCallback(async () => {
     console.log("[Quiz Trigger] startQuizFlow invoked", {
       stockProp: stock,
       stockNameProp: stockName,
@@ -171,77 +171,67 @@ export function SafetyQuizFlow({
       };
 
       console.log(
-        "[Quiz Trigger] Dispatching fetch to Cloudflare tunnel quiz with payload:",
+        "[Quiz Trigger] Client-side fetch to Cloudflare tunnel quiz with payload:",
         payload
       );
 
-      fetch("https://developers-shoppers-myrtle-advise.trycloudflare.com/quiz", {
+      const response = await fetch("https://developers-shoppers-myrtle-advise.trycloudflare.com/quiz", {
         method: "POST",
         headers: { "content-type": "application/json", "x-locale": locale },
         body: JSON.stringify(payload),
-      })
-        .then(async (response) => {
-          console.log(
-            `[Quiz Trigger] Received response status from backend quiz: ${response.status} (${response.statusText})`
-          );
-          const body: unknown = await response.json().catch((err) => {
-            console.warn(
-              "[Quiz Trigger] Failed to parse response body as JSON:",
-              err
-            );
-            return null;
-          });
-          if (!response.ok) {
-            console.error(
-              `[Quiz Trigger] backend quiz returned non-200 status ${response.status}:`,
-              body
-            );
-            const code =
-              typeof body === "object" && body !== null && "error" in body
-                ? (body as { error?: unknown }).error
-                : response.status;
-            return Promise.reject(code);
-          }
-          return body as StartResponse & { quiz?: QuizQuestion[]; quiz_id?: string; session_id?: string };
-        })
-        .then((data) => {
-          const questionsList = Array.isArray(data?.questions)
-            ? data.questions
-            : Array.isArray(data?.quiz)
-            ? data.quiz
-            : [];
-          console.log("[Quiz Trigger] Quiz generation succeeded. Received payload:", {
-            quizId: data?.quizId ?? data?.quiz_id ?? data?.session_id,
-            topic: data?.topic,
-            questionsCount: questionsList.length,
-          });
-          if (questionsList.length === 0) {
-            console.error(
-              "[Quiz Trigger] Invalid response: questions array is missing or empty:",
-              data
-            );
-            throw new Error("empty_questions");
-          }
-          startQuiz({
-            quizId: data?.quizId ?? data?.quiz_id ?? data?.session_id ?? null,
-            topic: data?.topic ?? null,
-            questions: questionsList,
-          });
-          setQuizPhase("questions");
-          setGenerating(false);
-        })
-        .catch((err: unknown) => {
-          console.error("[Quiz Trigger] Quiz generation flow caught error:", err);
-          setErrorKind(errorKindOf(err));
-          setQuizPhase("startError");
-          setGenerating(false);
-        });
-    } catch (err: unknown) {
-      console.error(
-        "[Quiz Trigger] Unexpected synchronous exception in startQuizFlow before fetch:",
-        err
+      });
+
+      console.log(
+        `[Quiz Trigger] Received response status from backend quiz: ${response.status} (${response.statusText})`
       );
-      setErrorKind("generic");
+
+      const body: any = await response.json().catch((err) => {
+        console.warn("[Quiz Trigger] Failed to parse response body as JSON:", err);
+        return null;
+      });
+
+      if (!response.ok) {
+        console.error(
+          `[Quiz Trigger] backend quiz returned non-200 status ${response.status}:`,
+          body
+        );
+        const code =
+          typeof body === "object" && body !== null && "error" in body
+            ? (body as { error?: unknown }).error
+            : response.status;
+        throw code;
+      }
+
+      const questionsList = Array.isArray(body?.questions)
+        ? body.questions
+        : Array.isArray(body?.quiz)
+        ? body.quiz
+        : [];
+
+      console.log("[Quiz Trigger] Quiz generation succeeded. Received payload:", {
+        quizId: body?.quizId ?? body?.quiz_id ?? body?.session_id,
+        topic: body?.topic,
+        questionsCount: questionsList.length,
+      });
+
+      if (questionsList.length === 0) {
+        console.error(
+          "[Quiz Trigger] Invalid response: questions array is missing or empty:",
+          body
+        );
+        throw new Error("empty_questions");
+      }
+
+      startQuiz({
+        quizId: body?.quizId ?? body?.quiz_id ?? body?.session_id ?? null,
+        topic: body?.topic ?? null,
+        questions: questionsList,
+      });
+      setQuizPhase("questions");
+      setGenerating(false);
+    } catch (err: unknown) {
+      console.error("[Quiz Trigger] Quiz generation flow caught error:", err);
+      setErrorKind(errorKindOf(err));
       setQuizPhase("startError");
       setGenerating(false);
     }

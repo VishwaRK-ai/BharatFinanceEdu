@@ -176,7 +176,11 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
         ]);
         setStatus("idle");
         // The reply may have changed the language-applied FOMO signal.
-        useFomoStore.getState().refresh();
+        try {
+          useFomoStore.getState().refresh();
+        } catch {
+          // non-critical
+        }
       } catch (err) {
         console.error("[Chatbot] Error during assistant query:", err);
         setErrorCode(err instanceof Error ? err.message : "upstream");
