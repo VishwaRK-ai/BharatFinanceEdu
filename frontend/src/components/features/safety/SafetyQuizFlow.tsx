@@ -162,25 +162,27 @@ export function SafetyQuizFlow({
 
       const payload = {
         ticker: effectiveTicker,
+        target_stock: effectiveTicker,
+        targetStock: effectiveTicker,
+        session_id: `safety_${effectiveTicker}`,
         locale: locale || "en",
         ...(flow.tipSource ? { tipSource: flow.tipSource } : {}),
         ...(summary ? { scanSummary: summary } : {}),
       };
 
       console.log(
-        "[Quiz Trigger] Dispatching fetch to /api/safety-quiz with payload:",
+        "[Quiz Trigger] Dispatching fetch to Cloudflare tunnel quiz with payload:",
         payload
       );
 
-      fetch("/api/safety-quiz", {
+      fetch("https://developers-shoppers-myrtle-advise.trycloudflare.com/quiz", {
         method: "POST",
         headers: { "content-type": "application/json", "x-locale": locale },
-        credentials: "same-origin",
         body: JSON.stringify(payload),
       })
         .then(async (response) => {
           console.log(
-            `[Quiz Trigger] Received response status from /api/safety-quiz: ${response.status} (${response.statusText})`
+            `[Quiz Trigger] Received response status from backend quiz: ${response.status} (${response.statusText})`
           );
           const body: unknown = await response.json().catch((err) => {
             console.warn(
@@ -191,7 +193,7 @@ export function SafetyQuizFlow({
           });
           if (!response.ok) {
             console.error(
-              `[Quiz Trigger] /api/safety-quiz returned non-200 status ${response.status}:`,
+              `[Quiz Trigger] backend quiz returned non-200 status ${response.status}:`,
               body
             );
             const code =
@@ -200,17 +202,20 @@ export function SafetyQuizFlow({
                 : response.status;
             return Promise.reject(code);
           }
-          return body as StartResponse;
+          return body as StartResponse & { quiz?: QuizQuestion[]; quiz_id?: string; session_id?: string };
         })
         .then((data) => {
+          const questionsList = Array.isArray(data?.questions)
+            ? data.questions
+            : Array.isArray(data?.quiz)
+            ? data.quiz
+            : [];
           console.log("[Quiz Trigger] Quiz generation succeeded. Received payload:", {
-            quizId: data?.quizId,
+            quizId: data?.quizId ?? data?.quiz_id ?? data?.session_id,
             topic: data?.topic,
-            questionsCount: Array.isArray(data?.questions)
-              ? data.questions.length
-              : 0,
+            questionsCount: questionsList.length,
           });
-          if (!data || !Array.isArray(data.questions) || data.questions.length === 0) {
+          if (questionsList.length === 0) {
             console.error(
               "[Quiz Trigger] Invalid response: questions array is missing or empty:",
               data
@@ -218,9 +223,9 @@ export function SafetyQuizFlow({
             throw new Error("empty_questions");
           }
           startQuiz({
-            quizId: data.quizId ?? null,
-            topic: data.topic ?? null,
-            questions: data.questions,
+            quizId: data?.quizId ?? data?.quiz_id ?? data?.session_id ?? null,
+            topic: data?.topic ?? null,
+            questions: questionsList,
           });
           setQuizPhase("questions");
           setGenerating(false);

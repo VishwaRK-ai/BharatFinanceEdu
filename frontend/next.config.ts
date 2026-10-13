@@ -3,15 +3,6 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
-const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: "http://20.41.114.241:8000/:path*",
-      },
-    ];
-  },
-};
+const nextConfig: NextConfig = {};
 
 export default withNextIntl(nextConfig);

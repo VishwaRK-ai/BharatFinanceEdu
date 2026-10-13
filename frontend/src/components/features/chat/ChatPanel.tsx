@@ -150,17 +150,16 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       setErrorKind(null);
 
       try {
-        console.log("[Chatbot] Dispatching fetch to /api/chat with message:", trimmed);
-        const res = await fetch("/api/chat", {
+        console.log("[Chatbot] Dispatching fetch to Cloudflare tunnel with message:", trimmed);
+        const res = await fetch("https://developers-shoppers-myrtle-advise.trycloudflare.com/chat", {
           method: "POST",
           headers: {
             "content-type": "application/json",
             "x-locale": locale,
           },
-          credentials: "same-origin",
           body: JSON.stringify({ message: trimmed }),
         });
-        console.log(`[Chatbot] Received response status from /api/chat: ${res.status}`);
+        console.log(`[Chatbot] Received response status from Cloudflare tunnel: ${res.status}`);
         if (!res.ok) {
           const body: { error?: string; detail?: string } | null = await res
             .json()
